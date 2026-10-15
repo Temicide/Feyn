@@ -51,6 +51,7 @@
   background: var(--bg);
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
+  scrollbar-gutter: stable;
 }
 * {
   box-sizing: border-box;
@@ -1993,6 +1994,7 @@ a.link-button {
 .join-row {
   display: flex;
   gap: 8px;
+  min-width: 0;
 }
 .join-row input {
   flex: 1;
