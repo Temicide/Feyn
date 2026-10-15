@@ -138,6 +138,12 @@ export const teacherSchema = z.object({
   ),
 });
 export type TeacherData = z.infer<typeof teacherSchema>;
+export const teacherViewSchema = teacherSchema.extend({ ubot: z.boolean() });
+export const recapDraftSchema = z.object({
+  text: z.string(),
+  provider: z.string(),
+  at: z.string(),
+});
 export const bootstrapSchema = z.object({
   lesson: lessonSchema,
   learner: learnerSchema,

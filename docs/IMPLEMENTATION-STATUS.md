@@ -16,7 +16,7 @@ Feyn implements one English lesson. A learner explains the cart-speed problem to
 
 ## Remaining work
 
-U-Bot has no native MCP client. The Chrome extension bridge is retired, and a server-side U-Bot connection is in progress.
+U-Bot has no native MCP client. The Chrome extension bridge is retired. Teachers can ask U-Bot to draft the class recap plan from names-free concept counts through U-Bot's unpublished chat endpoint. It is tested against stubbed U-Bot replies; a live U-Bot call awaits the operator's U-Bot credentials.
 
 Automatic individual support flags are deferred until the system can record a fresh application question and evidence that the same specific misconception persists after a review opportunity. Current concept gaps remain visible for the teacher's recap. Repeated main submissions or a missed optional question alone must not trigger intervention.
 

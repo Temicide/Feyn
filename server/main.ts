@@ -7,6 +7,7 @@ import { Attempts, belongsTo } from "./attempts.js";
 import { auth, authConfig, HttpError } from "./auth.js";
 import { openStore, type RecordStore } from "./store.js";
 import { lesson } from "./lesson.js";
+import { classRecapCounts, draftRecap, ubotConfig } from "./ubot.js";
 import {
   assessMain,
   assessDiagnostic,
@@ -36,6 +37,7 @@ export function createApp(
 ): express.Express {
   const store = new Attempts(records);
   const config = authConfig(env);
+  const ubot = ubotConfig(env);
   const { router, caller, teacher } = auth(config, (session) =>
     store.signIn(session.sub, session.name, session.role === "teacher"),
   );
@@ -114,7 +116,14 @@ export function createApp(
   });
   app.get("/api/teacher", async (req, res) => {
     teacher(req);
-    res.json(await store.teacher());
+    res.json({ ...(await store.teacher()), ubot: Boolean(ubot) });
+  });
+  app.post("/api/teacher/recap-draft", async (req, res) => {
+    teacher(req);
+    if (!ubot) throw new HttpError(404, "U-Bot is not configured on the server.");
+    res.json(
+      await draftRecap(ubot, lesson.question, classRecapCounts(await store.teacher())),
+    );
   });
   app.put("/api/profile", async (req, res) => {
     teacher(req);
@@ -309,20 +318,7 @@ export function createApp(
       get_class_recap: {
         description:
           "Read per-concept counts of current gaps, resolved gaps, demonstrated and unassessed learners. Contains no learner names. Counts include labeled sample learners.",
-        read: async () => {
-          const { learners, recap } = await store.teacher();
-          return {
-            learners: learners.length,
-            sampleLearners: learners.filter((l) => l.sample).length,
-            concepts: recap.map((row) => ({
-              concept: row.title,
-              currentGaps: row.gaps.length,
-              resolved: row.resolved.length,
-              demonstrated: row.demonstrated.length,
-              unassessed: row.unassessed.length,
-            })),
-          };
-        },
+        read: async () => classRecapCounts(await store.teacher()),
       },
       list_attempts: {
         description:

@@ -2,14 +2,16 @@ import { useEffect, useState } from "react";
 import {
   attemptSchema,
   profileSchema,
+  recapDraftSchema,
   reviewedTranscript,
-  teacherSchema,
+  teacherViewSchema,
   type Attempt,
   type Criterion,
   type Lesson,
   type Profile,
   type TeacherData,
 } from "../shared/contracts.js";
+import type { z } from "zod";
 import { api, json } from "./api.js";
 
 const labels = {
@@ -30,13 +32,17 @@ export function Teacher({
   selectedAttemptId: string | null;
   onProfile: (profile: Profile) => Promise<void>;
 }) {
-  const [data, setData] = useState<TeacherData | null>(null),
+  const [data, setData] = useState<z.infer<typeof teacherViewSchema> | null>(
+      null,
+    ),
+    [draft, setDraft] = useState<z.infer<typeof recapDraftSchema> | null>(null),
+    [drafting, setDrafting] = useState(false),
     [error, setError] = useState(""),
     [selected, setSelected] = useState<string | null>(selectedAttemptId),
     [tab, setTab] = useState<"evidence" | "recap">("evidence");
   async function refresh() {
     try {
-      setData(await api("/teacher", teacherSchema));
+      setData(await api("/teacher", teacherViewSchema));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load evidence.");
     }
@@ -44,6 +50,17 @@ export function Teacher({
   useEffect(() => {
     void refresh();
   }, []);
+  async function draftRecap() {
+    setDrafting(true);
+    setError("");
+    try {
+      setDraft(await api("/teacher/recap-draft", recapDraftSchema, json("POST", {})));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "U-Bot could not draft the recap.");
+    } finally {
+      setDrafting(false);
+    }
+  }
   const attempts =
       data?.attempts.toSorted((a, b) =>
         b.createdAt.localeCompare(a.createdAt),
@@ -155,6 +172,31 @@ export function Teacher({
             demonstrated. Unclear newer evidence does not overwrite usable
             earlier evidence.
           </p>
+          {data.ubot && (
+            <section className="support-queue">
+              <div className="section-label">RECAP PLAN</div>
+              <h2>Ask U-Bot to plan the recap.</h2>
+              <p className="fine-print">
+                Sends U-Bot only the concept counts above. No names, transcripts,
+                or recordings leave Feyn.
+              </p>
+              <button
+                className="button primary"
+                disabled={drafting}
+                onClick={() => void draftRecap()}
+              >
+                {drafting ? "U-Bot is drafting…" : "Draft recap with U-Bot"}
+              </button>
+              {draft && (
+                <div className="recap-draft">
+                  <p style={{ whiteSpace: "pre-wrap" }}>{draft.text}</p>
+                  <p className="fine-print">
+                    {draft.provider} · {new Date(draft.at).toLocaleString()}
+                  </p>
+                </div>
+              )}
+            </section>
+          )}
           <section className="support-queue">
             <div className="section-label">INDIVIDUAL SUPPORT</div>
             <h2>Let the evidence guide your next step.</h2>

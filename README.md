@@ -64,6 +64,12 @@ Open **Teacher's desk**, select a saved attempt, and inspect the original audio,
 
 The class recap counts each learner once per concept using the latest usable timestamped main, diagnostic, or teacher-review observation. A resolving diagnostic can clear a current gap while a wrong diagnostic can expose one. Neither changes the main result. Missing or unclear evidence stays separate. Automatic individual help flags are deferred. Repeated main-explanation gaps alone do not establish that a specific misconception persisted after a fresh application question without meaningful progress. The recap still shows current gaps, and the teacher can inspect the evidence to decide who needs support. No optional question or choice not to retry creates a help flag.
 
+## Draft the recap with U-Bot
+
+With `UBOT_EMAIL`, `UBOT_PASSWORD`, and `UBOT_SUPABASE_ANON_KEY` set, the class recap shows **Draft recap with U-Bot**. The server signs in to that U-Bot account and asks U-Bot for a short recap plan. It sends only the per-concept counts and how many records are samples. No names, transcripts, or recordings leave Feyn. The reply is labeled **U-Bot (unofficial chat API)**.
+
+U-Bot publishes no API. This uses the same sign-in and chat endpoint as the u.bot website, so a change on their side can break it. `UBOT_SUPABASE_ANON_KEY` is the public key embedded in the u.bot website. Teachers do not count as learners in the recap.
+
 ## Verify the app
 
 ```sh
