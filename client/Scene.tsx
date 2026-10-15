@@ -3,7 +3,6 @@ import {
   reviewedTranscript,
   type Answer,
   type Attempt,
-  type Lesson,
 } from "../shared/contracts.js";
 import { Recorder } from "./Recorder.js";
 
@@ -28,19 +27,22 @@ function mainLines(attempt: Attempt, answer: Answer): Line[] {
   const excerptText = excerpt(
     result?.criteria.find((c) => c.quote)?.quote || reviewedTranscript(answer),
   );
-  const gap = result?.criteria.find((c) => c.state !== "demonstrated");
+  const gap = result?.criteria.find((c) => c.state !== "demonstrated"),
+    gapTitle = attempt.rubric.concepts.find((c) => c.id === gap?.id)?.title;
   return [
     { speaker: "You", text: excerptText, expression: "listening" },
     {
       speaker: "Pip",
       text:
         result?.outcome === "pass"
-          ? attempt.profile === "playful"
-            ? "Okay! My little toy cart has a speed for one tiny moment. Let me try a tricky example."
+          ? attempt.rubric.profile === "playful"
+            ? "Ooh, I think I can picture it now! Let me try a tricky example."
             : "I think I follow your explanation. Can I check it with a different example?"
           : result?.outcome === "not-enough-evidence"
-            ? "I couldn’t quite catch enough of that. Can we try a little example together?"
-            : `I’m still wondering about ${gap?.id === "distance-speed" ? "how distance and speed are different" : gap?.id === "average-instantaneous" ? "one whole second compared with one tiny moment" : "what the number at three seconds actually means"}. Can we look at an example?`,
+            ? "I couldn't quite catch enough of that. Can we try a little example together?"
+            : gapTitle
+              ? `I'm still wondering about this part: ${gapTitle}. Can we look at an example?`
+              : "I'm still wondering about part of it. Can we look at an example?",
       expression: result?.outcome === "pass" ? "aha" : "puzzled",
     },
   ];
@@ -55,16 +57,16 @@ function endingLines(attempt: Attempt): Line[] {
       {
         speaker: "Pip",
         text: unresolved
-          ? "Your explanation helped! I’m still puzzled by that last example. Maybe we can try it again sometime."
-          : "Your explanation helped me see the difference between a whole interval and one moment!",
+          ? "Your explanation helped! I'm still puzzled by that last example. Maybe we can try it again sometime."
+          : "Your explanation helped me see how it all fits together!",
         expression: "aha",
       },
       {
         speaker: "Pip",
         text:
           attempt.endingVariant === 0
-            ? "There’s the bell! I’m taking this idea with me. Thanks for teaching me."
-            : "I’m going to draw our cart on the board. One little moment can tell us so much!",
+            ? "There's the bell! I'm taking this idea with me. Thanks for teaching me."
+            : "I'm going to write what you taught me on the board, so I don't forget it!",
         expression: "aha",
       },
     ];
@@ -73,13 +75,13 @@ function endingLines(attempt: Attempt): Line[] {
       speaker: "Pip",
       text:
         attempt.endingVariant === 0
-          ? "I found a toy cart for next time. I’d like to understand that confusing part a little better."
-          : "I’m opening my notebook at the part I’m still wondering about. We can take another look together.",
+          ? "I found something to play with while I think. I'd like to understand that confusing part a little better."
+          : "I'm opening my notebook at the part I'm still wondering about. We can take another look together.",
       expression: "puzzled",
     },
     {
       speaker: "Pip",
-      text: "Thanks for thinking it through with me. When you’re ready, try teaching it again in your own words.",
+      text: "Thanks for thinking it through with me. When you're ready, try teaching it again in your own words.",
       expression: "listening",
     },
   ];
@@ -88,7 +90,6 @@ export function Scene({
   attempt,
   answer,
   diagnosticAnswers,
-  lesson,
   onSubmit,
   onFinish,
   onRetry,
@@ -97,7 +98,6 @@ export function Scene({
   attempt: Attempt;
   answer: Answer;
   diagnosticAnswers: Answer[];
-  lesson: Lesson;
   onSubmit: (answer: Answer) => Promise<void>;
   onFinish: () => Promise<void>;
   onRetry: () => Promise<void>;
@@ -148,14 +148,14 @@ export function Scene({
       line = intro[stage.index] ??
         intro[0] ?? {
           speaker: "Pip",
-          text: "Let’s begin.",
+          text: "Let's begin.",
           expression: "listening",
         };
       break;
     case "question":
       line = {
         speaker: "Pip",
-        text: lesson.followups[stage.number - 1]?.question ?? "",
+        text: attempt.rubric.followups[stage.number - 1]?.question ?? "",
         expression: "thinking",
       };
       break;
@@ -179,8 +179,8 @@ export function Scene({
                 diagnostic?.assessment.outcome === "correct"
                   ? "Oh! That helps me connect it to the example."
                   : diagnostic?.assessment.outcome === "incorrect"
-                    ? "Hmm, I’m still not sure how that works for this example. We can come back to it."
-                    : "I couldn’t hear enough to be sure. We can come back to this example.",
+                    ? "Hmm, I'm still not sure how that works for this example. We can come back to it."
+                    : "I couldn't hear enough to be sure. We can come back to this example.",
               expression:
                 diagnostic?.assessment.outcome === "correct"
                   ? "aha"
@@ -284,10 +284,9 @@ export function Scene({
   return (
     <section className="scene-wrap">
       <div className="scene-toolbar">
-        <div>
-          <span className="status-dot" /> THE LITTLE CLASSROOM{" "}
-          <span className="scene-profile">Pip is {attempt.profile}</span>
-        </div>
+        <p>
+          Pip is feeling <b>{attempt.rubric.profile}</b> today
+        </p>
         <button
           className="sound-button"
           aria-pressed={!muted}
@@ -296,171 +295,287 @@ export function Scene({
             void context.current?.resume();
           }}
         >
-          {muted ? "♪ Sound off" : "♪ Sound on"}
+          {muted ? "Sound off" : "Sound on"}
         </button>
       </div>
       {attempt.sample && (
-        <div className="scene-sample">
-          SAMPLE WALKTHROUGH ·{" "}
-          {answer.provenance === "scripted-sample"
-            ? "Prepared student words"
-            : "Transcribed student recording"}{" "}
-          ·{" "}
-          {attempt.mainAssessment?.provider}
-        </div>
-      )}
-      <div
-        className={`classroom expression-${line.expression} ${stage.kind === "ending" || stage.kind === "done" ? `ending-room event-${attempt.mainAssessment?.outcome === "pass" ? "pass" : "retry"}-${attempt.endingVariant}` : ""}`}
-      >
-        <div
-          className="room-art"
-          style={
-            roomArt
-              ? undefined
-              : {
-                  backgroundImage: "url(/art/classroom.svg)",
-                  backgroundSize: "contain",
-                  backgroundRepeat: "no-repeat",
-                }
-          }
-          role="img"
-          aria-label="A warm pixel art classroom with Pip at a desk and your character at the board"
-          dangerouslySetInnerHTML={roomArt ? { __html: roomArt } : undefined}
-        />
-        <div className="chalk-writing">
-          <span>s(t) = t²</span>
-          <span>one moment, at t = 3</span>
-        </div>
-        {(stage.kind === "ending" || stage.kind === "done") && (
-          <>
-            <div className="ending-spark">
-              {attempt.mainAssessment?.outcome === "pass" ? "✦" : "✧"}
-            </div>
-            {attempt.mainAssessment?.outcome !== "pass" && (
-              <div
-                className={
-                  attempt.endingVariant === 0
-                    ? "ending-toy-cart"
-                    : "ending-notebook"
-                }
-                aria-label={
-                  attempt.endingVariant === 0
-                    ? "Pip brings out a toy cart"
-                    : "Pip opens a notebook"
-                }
-              >
-                {attempt.endingVariant === 0 ? "▰" : "▤"}
-              </div>
-            )}
-            {attempt.mainAssessment?.outcome === "pass" &&
-              attempt.endingVariant === 1 && (
-                <div className="ending-board-note">a moment! ✦</div>
-              )}
-          </>
-        )}
-        <div
-          className="dialogue-box"
-          role="button"
-          tabIndex={0}
-          onClick={next}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              next();
-            }
-          }}
-          aria-label="Dialogue. Click to reveal, then click to advance."
-        >
-          <img
-            className="portrait"
-            src={
-              processing || recordBusy || line.speaker === "You"
-                ? "/art/student-speaking.svg"
-                : `/art/child-${line.expression}.svg`
-            }
-            alt=""
-          />
-          <div className="dialogue-content">
-            <div className="dialogue-name">
-              {processing || recordBusy ? "You" : line.speaker}
-            </div>
-            <p aria-live="polite">
-              {text.slice(0, visible)}
-              <span className="typing-cursor">▌</span>
-            </p>
-            {stage.kind !== "question" &&
-              (stage.kind !== "response" || stage.index === 0) &&
-              stage.kind !== "done" && (
-                <span className="advance-hint">
-                  {visible < text.length
-                    ? "click to reveal"
-                    : "click to continue ▾"}
-                </span>
-              )}
-          </div>
-        </div>
-      </div>
-      {stage.kind === "question" && (
-        <div className="scene-answer">
-          <div className="section-label">
-            {stage.number === 1
-              ? "LET’S TRY AN EXAMPLE"
-              : "ONE MORE, IF YOU LIKE"}{" "}
-            <span>Question {stage.number} of 2</span>
-          </div>
-          <Recorder
-            key={stage.number}
-            attempt={attempt}
-            kind={stage.number === 1 ? "followup-1" : "followup-2"}
-            onSubmit={onSubmit}
-            onBusy={busy}
-          />
-        </div>
-      )}
-      {stage.kind === "response" && stage.index === 1 && (
-        <div className="scene-choices">
-          {stage.number === 1 && (
-            <button
-              className="button"
-              onClick={() => setStage({ kind: "question", number: 2 })}
-            >
-              Try one more example
-            </button>
+        <ul className="scene-sample" aria-label="Sample walkthrough">
+          <li className="sample-tag">Sample walkthrough</li>
+          <li>
+            {answer.provenance === "scripted-sample"
+              ? "Prepared student words"
+              : "Transcribed student recording"}
+          </li>
+          {attempt.mainAssessment && (
+            <li>Assessed by {attempt.mainAssessment.provider}</li>
           )}
-          <button
-            className="button primary"
-            onClick={() => setStage({ kind: "ending", index: 0 })}
-          >
-            See what happens →
-          </button>
-          <p className="fine-print">
-            {attempt.mainAssessment?.outcome === "pass"
-              ? "Your explanation earned completion. Practice questions do not change that."
-              : "These questions help us see what to explore next."}
-          </p>
-        </div>
+        </ul>
       )}
-      {stage.kind === "done" && (
-        <div className="scene-choices">
-          <div className="ending-status">
-            {attempt.mainAssessment?.outcome === "pass"
-              ? "✦ Explanation complete"
-              : "A little more to explore"}
+      <div className="game-screen">
+        <div
+          className={`classroom expression-${line.expression} ${stage.kind === "ending" || stage.kind === "done" ? `ending-room event-${attempt.mainAssessment?.outcome === "pass" ? "pass" : "retry"}-${attempt.endingVariant}` : ""}`}
+        >
+          <div
+            className="room-art"
+            style={
+              roomArt
+                ? undefined
+                : {
+                    backgroundImage: "url(/art/classroom.svg)",
+                    backgroundSize: "contain",
+                    backgroundRepeat: "no-repeat",
+                  }
+            }
+            role="img"
+            aria-label="A warm pixel art classroom with Pip at a desk and your character at the board"
+            dangerouslySetInnerHTML={roomArt ? { __html: roomArt } : undefined}
+          />
+          <div className="chalk-writing">
+            <span>{attempt.rubric.title}</span>
+            {attempt.rubric.concepts[0] && (
+              <span>{attempt.rubric.concepts[0].title}</span>
+            )}
           </div>
-          <button className="button primary" onClick={() => void finish(false)}>
-            Finish lesson
-          </button>
-          <button className="button" onClick={() => void finish(true)}>
-            Try explaining again
-          </button>
-          {finishError && <p className="error">{finishError}</p>}
+          {(stage.kind === "ending" || stage.kind === "done") && (
+            <>
+              <PixelSpark className="ending-spark" />
+              {attempt.mainAssessment?.outcome !== "pass" && (
+                <div
+                  className={
+                    attempt.endingVariant === 0
+                      ? "ending-toy-cart"
+                      : "ending-notebook"
+                  }
+                  aria-label={
+                    attempt.endingVariant === 0
+                      ? "Pip brings out a toy cart"
+                      : "Pip opens a notebook"
+                  }
+                >
+                  {attempt.endingVariant === 0 ? (
+                    <PixelCart />
+                  ) : (
+                    <PixelNotebook />
+                  )}
+                </div>
+              )}
+              {attempt.mainAssessment?.outcome === "pass" &&
+                attempt.endingVariant === 1 && (
+                  <div className="ending-board-note">got it!</div>
+                )}
+            </>
+          )}
+          <div
+            className="dialogue-box"
+            role="button"
+            tabIndex={0}
+            onClick={next}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                next();
+              }
+            }}
+            aria-label="Dialogue. Click to reveal, then click to advance."
+          >
+            <img
+              className="dialogue-portrait"
+              src={
+                processing || recordBusy || line.speaker === "You"
+                  ? "/art/student-speaking.png"
+                  : `/art/child-${line.expression}.png`
+              }
+              alt=""
+            />
+            <div className="dialogue-body">
+              <p className="dialogue-name">
+                {processing || recordBusy ? "You" : line.speaker}
+              </p>
+              <p
+                className={`dialogue-line ${text === "•••" ? "is-thinking" : ""}`}
+                aria-live="polite"
+              >
+                {text === "•••" ? (
+                  <span className="thinking-dots">
+                    <i />
+                    <i />
+                    <i />
+                    <span className="visually-hidden">Thinking</span>
+                  </span>
+                ) : (
+                  text.slice(0, visible)
+                )}
+              </p>
+              {stage.kind !== "question" &&
+                (stage.kind !== "response" || stage.index === 0) &&
+                stage.kind !== "done" && (
+                  <span className="advance-hint" aria-hidden="true">
+                    {visible < text.length ? "Show all" : "Next"}
+                  </span>
+                )}
+            </div>
+          </div>
         </div>
-      )}
+        {stage.kind === "question" && (
+          <div className="scene-answer">
+            <p className="dialogue-name">
+              {stage.number === 1
+                ? "Your answer to Pip"
+                : "One more, if you like"}
+              <span>
+                Question {stage.number} of {attempt.rubric.followups.length}
+              </span>
+            </p>
+            <Recorder
+              key={stage.number}
+              attempt={attempt}
+              kind={stage.number === 1 ? "followup-1" : "followup-2"}
+              onSubmit={onSubmit}
+              onBusy={busy}
+            />
+          </div>
+        )}
+        {stage.kind === "response" && stage.index === 1 && (
+          <div className="scene-choices">
+            {stage.number === 1 && attempt.rubric.followups.length > 1 && (
+              <button
+                className="choice"
+                onClick={() => setStage({ kind: "question", number: 2 })}
+              >
+                Try one more example
+              </button>
+            )}
+            <button
+              className="choice choice-primary"
+              onClick={() => setStage({ kind: "ending", index: 0 })}
+            >
+              See what Pip does
+            </button>
+            <p className="choices-note">
+              {attempt.mainAssessment?.outcome === "pass"
+                ? "Your explanation earned completion. Practice questions do not change that."
+                : "These questions help us see what to explore next."}
+            </p>
+          </div>
+        )}
+        {stage.kind === "done" && (
+          <div className="scene-choices">
+            <p className="ending-status">
+              {attempt.mainAssessment?.outcome === "pass"
+                ? "Explanation complete"
+                : "A little more to explore"}
+            </p>
+            <button
+              className="choice choice-primary"
+              onClick={() => void finish(false)}
+            >
+              Finish
+            </button>
+            <button className="choice" onClick={() => void finish(true)}>
+              Try explaining again
+            </button>
+            {finishError && <p className="error">{finishError}</p>}
+          </div>
+        )}
+      </div>
       {processing && (
-        <p className="scene-processing" role="status">
-          Pip is thinking<span className="thinking-dots">•••</span>
+        <p className="visually-hidden" role="status">
+          Pip is thinking
         </p>
       )}
     </section>
+  );
+}
+
+function pixels(rows: string[], colors: Record<string, string>) {
+  return rows.flatMap((row, y) =>
+    [...row].flatMap((cell, x) =>
+      colors[cell]
+        ? [
+            <rect
+              key={`${x}-${y}`}
+              x={x}
+              y={y}
+              width="1"
+              height="1"
+              fill={colors[cell]}
+            />,
+          ]
+        : [],
+    ),
+  );
+}
+export function PixelSpark({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 7 7"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+    >
+      {pixels(
+        [
+          "...o...",
+          "...y...",
+          "..yyy..",
+          "oyyWyyo",
+          "..yyy..",
+          "...y...",
+          "...o...",
+        ],
+        { o: "#ae784d", y: "#f5df9b", W: "#ffffff" },
+      )}
+    </svg>
+  );
+}
+function PixelCart() {
+  return (
+    <svg viewBox="0 0 16 11" shapeRendering="crispEdges" aria-hidden="true">
+      {pixels(
+        [
+          "..kkkkkkkkkk....",
+          ".kttttttttttk...",
+          ".ktTTTTTTTTtk...",
+          "kttttttttttttk..",
+          "kttttttttttttkkk",
+          "kkkkkkkkkkkkkk.k",
+          "..kkk.....kkk...",
+          ".kwwwk...kwwwk..",
+          ".kwkwk...kwkwk..",
+          ".kwwwk...kwwwk..",
+          "..kkk.....kkk...",
+        ],
+        { k: "#3b302f", t: "#438e94", T: "#7fc0c4", w: "#e7edc8" },
+      )}
+    </svg>
+  );
+}
+function PixelNotebook() {
+  return (
+    <svg viewBox="0 0 15 12" shapeRendering="crispEdges" aria-hidden="true">
+      {pixels(
+        [
+          "kkkkkkk.kkkkkkk",
+          "kpppppkkkpppppk",
+          "kplllpkrkplllpk",
+          "kpppppkrkpppppk",
+          "kplllpkrkpllppk",
+          "kpppppkrkpppppk",
+          "kpllppkrkplllpk",
+          "kpppppkrkpppppk",
+          "kplllpkrkppqppk",
+          "kpppppkrkpppppk",
+          "kkkkkkkrkkkkkkk",
+          ".......k.......",
+        ],
+        {
+          k: "#3b302f",
+          p: "#e7edc8",
+          l: "#8ba99a",
+          r: "#d7a343",
+          q: "#d86a7c",
+        },
+      )}
+    </svg>
   );
 }

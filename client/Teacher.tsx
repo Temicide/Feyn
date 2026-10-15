@@ -1,40 +1,37 @@
 import { useEffect, useState } from "react";
 import {
   attemptSchema,
-  profileSchema,
   recapDraftSchema,
   reviewedTranscript,
   teacherViewSchema,
   type Attempt,
   type Criterion,
-  type Lesson,
-  type Profile,
-  type TeacherData,
+  type TeacherView,
 } from "../shared/contracts.js";
 import type { z } from "zod";
 import { api, json } from "./api.js";
+import { href } from "./route.js";
+import { failure, Loading } from "./ui.js";
 
 const labels = {
   pass: "Meets the main criteria",
   "needs-work": "Main explanation needs work",
   "not-enough-evidence": "Not enough evidence",
 };
+const edited = (attempt: Attempt, data: TeacherView) =>
+  attempt.rubric.revision < data.assignment.revision;
 export function Teacher({
-  lesson,
+  assignmentId,
   learnerId,
-  profile,
-  onProfile,
   selectedAttemptId,
+  setContext,
 }: {
-  lesson: Lesson;
+  assignmentId: string;
   learnerId: string;
-  profile: Profile;
   selectedAttemptId: string | null;
-  onProfile: (profile: Profile) => Promise<void>;
+  setContext: (text: string) => void;
 }) {
-  const [data, setData] = useState<z.infer<typeof teacherViewSchema> | null>(
-      null,
-    ),
+  const [data, setData] = useState<TeacherView | null>(null),
     [draft, setDraft] = useState<z.infer<typeof recapDraftSchema> | null>(null),
     [drafting, setDrafting] = useState(false),
     [error, setError] = useState(""),
@@ -42,21 +39,34 @@ export function Teacher({
     [tab, setTab] = useState<"evidence" | "recap">("evidence");
   async function refresh() {
     try {
-      setData(await api("/teacher", teacherViewSchema));
+      setData(
+        await api(`/teacher/assignments/${assignmentId}`, teacherViewSchema),
+      );
+      setError("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load evidence.");
+      setError(failure(e, "Could not load evidence."));
     }
   }
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [assignmentId]);
+  useEffect(
+    () => setContext(data?.course.title ?? ""),
+    [data?.course.title, setContext],
+  );
   async function draftRecap() {
     setDrafting(true);
     setError("");
     try {
-      setDraft(await api("/teacher/recap-draft", recapDraftSchema, json("POST", {})));
+      setDraft(
+        await api(
+          `/teacher/assignments/${assignmentId}/recap-draft`,
+          recapDraftSchema,
+          json("POST", {}),
+        ),
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "U-Bot could not draft the recap.");
+      setError(failure(e, "U-Bot could not draft the recap."));
     } finally {
       setDrafting(false);
     }
@@ -71,137 +81,154 @@ export function Teacher({
       attempts[0];
   const name = (id: string) =>
     data?.learners.find((l) => l.id === id)?.name ?? id;
+  if (!data)
+    return error ? (
+      <div className="teacher-page">
+        <a className="link-button back-link" href={href({ kind: "desk" })}>
+          Your courses
+        </a>
+        <p className="error">{error}</p>
+      </div>
+    ) : (
+      <Loading text="Opening the teacher’s desk" />
+    );
   return (
     <div className="teacher-page">
+      <a
+        className="link-button back-link"
+        href={href({ kind: "teach-course", courseId: data.course.id })}
+      >
+        Back to {data.course.title}
+      </a>
       <div className="page-heading">
         <div>
-          <div className="eyebrow">THE TEACHER’S DESK</div>
-          <h1>
-            See the thinking.
-            <br />
-            <em>Choose what comes next.</em>
-          </h1>
+          <h1>{data.assignment.title || "Untitled assignment"}</h1>
           <p>
-            Listen to the explanation, follow the evidence, and add your
-            judgment.
+            Listen to each explanation, check Pip’s reading of it against the
+            student’s own words, and record your judgment.
           </p>
         </div>
-        <div className="teacher-profile">
-          <label>
-            Pip’s personality
-            <select
-              value={profile}
-              onChange={(event) => {
-                const next = profileSchema.parse(event.target.value);
-                void onProfile(next);
-              }}
-            >
-              <option value="curious">Curious · asks why and how</option>
-              <option value="playful">Playful · imagines examples</option>
-            </select>
-          </label>
-          <p className="fine-print">
-            Changes the conversation. The criteria stay the same.
-          </p>
-        </div>
+        <a
+          className="choice"
+          href={href({ kind: "edit", assignmentId: data.assignment.id })}
+        >
+          {data.assignment.locked ? "View assignment" : "Edit assignment"}
+        </a>
       </div>
-      <div className="teacher-tabs">
+      <div className="teacher-tabs" role="tablist">
         <button
-          className={tab === "evidence" ? "active" : ""}
+          role="tab"
+          aria-selected={tab === "evidence"}
           onClick={() => setTab("evidence")}
         >
           Student evidence
         </button>
         <button
-          className={tab === "recap" ? "active" : ""}
+          role="tab"
+          aria-selected={tab === "recap"}
           onClick={() => setTab("recap")}
         >
           Class recap
         </button>
-        <button className="text-button refresh" onClick={() => void refresh()}>
-          ↻ Refresh
+        <button className="link-button refresh" onClick={() => void refresh()}>
+          Refresh
         </button>
       </div>
       {error && <p className="error">{error}</p>}
-      {!data && <p>Opening the teacher’s desk…</p>}
-      {data && tab === "recap" && (
+      {tab === "recap" && (
         <>
-          <div className="sample-notice">
-            <strong>Illustrative class, real evidence kept separate.</strong>{" "}
-            Maya, Noah, Eli, and June are authored sample classmates. Learners
-            ending in “· walkthrough” hold each student’s labeled sample
-            attempts. Everyone else is a signed-in student. These records do not
-            demonstrate classroom learning benefit.
-          </div>
-          <div className="recap-table">
-            <div className="recap-row recap-header">
-              <span>Essential concept</span>
-              <span>Current gap</span>
-              <span>Resolved</span>
-              <span>Unassessed</span>
+          {data.learners.some((l) => l.sample) && (
+            <div className="sample-notice">
+              <strong>Some of these records are made up.</strong> Authored
+              sample classmates and names ending in “walkthrough” are labeled
+              samples. They don’t show that Feyn helps a real class learn.
             </div>
-            {data.recap.map((row) => (
-              <div className="recap-row" key={row.id}>
-                <div>
-                  <h3>{row.title}</h3>
-                  <p>
-                    {row.demonstrated.length} of {data.learners.length}{" "}
-                    currently demonstrate it
-                  </p>
-                </div>
-                <div>
-                  <b>{row.gaps.length}</b>
-                  <p>{row.gaps.map(name).join(", ") || "No current gaps"}</p>
-                </div>
-                <div>
-                  <b>{row.resolved.length}</b>
-                  <p>{row.resolved.map(name).join(", ") || "None recorded"}</p>
-                </div>
-                <div>
-                  <b>{row.unassessed.length}</b>
-                  <p>
-                    {row.unassessed.map(name).join(", ") || "Everyone assessed"}
-                  </p>
-                </div>
+          )}
+          {data.recap.length === 0 ? (
+            <p className="fine-print">
+              This assignment has no concepts yet, so there is nothing to
+              recap.
+            </p>
+          ) : (
+            <div className="recap-table">
+              <div className="recap-row recap-header">
+                <span>Essential concept</span>
+                <span>Current gap</span>
+                <span>Resolved</span>
+                <span>Unassessed</span>
               </div>
-            ))}
-          </div>
+              {data.recap.map((row) => (
+                <div className="recap-row" key={row.id}>
+                  <div>
+                    <h3>{row.title}</h3>
+                    <p>
+                      {row.demonstrated.length} of {data.roster.length}{" "}
+                      currently demonstrate it
+                    </p>
+                  </div>
+                  <Bucket
+                    kind="gap"
+                    label="Current gap"
+                    ids={row.gaps}
+                    name={name}
+                    empty="No current gaps"
+                  />
+                  <Bucket
+                    kind="resolved"
+                    label="Resolved"
+                    ids={row.resolved}
+                    name={name}
+                    empty="None yet"
+                  />
+                  <Bucket
+                    kind="unassessed"
+                    label="Unassessed"
+                    ids={row.unassessed}
+                    name={name}
+                    empty="Everyone assessed"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
           <p className="fine-print">
-            One learner per concept, using the latest usable main, diagnostic,
-            or teacher-reviewed evidence. Resolved learners also count as
-            demonstrated. Unclear newer evidence does not overwrite usable
-            earlier evidence.
+            The recap counts the {data.roster.length}{" "}
+            {data.roster.length === 1 ? "student" : "students"} currently
+            enrolled in this course. Each counts once per concept, using their
+            latest usable evidence from a main explanation, an example
+            question, or your review. Resolved students also count as
+            demonstrating the concept. Sample walkthroughs and students who
+            left keep their evidence, but aren’t counted here.
           </p>
           {data.ubot && (
             <section className="support-queue">
-              <div className="section-label">RECAP PLAN</div>
-              <h2>Ask U-Bot to plan the recap.</h2>
+              <h2>Plan the recap with U-Bot</h2>
               <p className="fine-print">
-                Sends U-Bot only the concept counts above. No names, transcripts,
-                or recordings leave Feyn.
+                U-Bot receives only the concept counts above. No names,
+                transcripts, or recordings leave Feyn.
               </p>
               <button
-                className="button primary"
+                className="choice choice-primary"
                 disabled={drafting}
                 onClick={() => void draftRecap()}
               >
-                {drafting ? "U-Bot is drafting…" : "Draft recap with U-Bot"}
+                {drafting ? "U-Bot is drafting" : "Draft recap with U-Bot"}
               </button>
               {draft && (
                 <div className="recap-draft">
                   <p style={{ whiteSpace: "pre-wrap" }}>{draft.text}</p>
                   <p className="fine-print">
-                    {draft.provider} · {new Date(draft.at).toLocaleString()}
+                    Drafted by {draft.provider} on{" "}
+                    {new Date(draft.at).toLocaleString()}
                   </p>
                 </div>
               )}
             </section>
           )}
           <section className="support-queue">
-            <div className="section-label">INDIVIDUAL SUPPORT</div>
-            <h2>Let the evidence guide your next step.</h2>
+            <h2>Individual support</h2>
             <p className="fine-print">
-              Automatic help flags are not active in this prototype. Repeated
+              Automatic help flags aren’t active in this prototype. Repeated
               main explanations or one missed optional question do not establish
               that the same misconception persisted after a fresh application
               question. Use the saved evidence and class recap to decide who
@@ -210,24 +237,38 @@ export function Teacher({
           </section>
         </>
       )}
-      {data && tab === "evidence" && (
+      {tab === "evidence" && (
         <div className="evidence-layout">
           <aside className="attempt-list">
-            <div className="section-label">
-              SAVED EXPLANATIONS <span>{attempts.length}</span>
-            </div>
-            {attempts.length === 0 && <p>No explanations yet.</p>}
+            <h2>
+              Turned in <span>{attempts.length}</span>
+            </h2>
+            {attempts.length === 0 && (
+              <p className="fine-print">
+                No explanations yet. They’ll appear here as students teach Pip.
+              </p>
+            )}
             {attempts.map((attempt) => (
               <button
                 key={attempt.id}
                 className={`attempt-item ${active?.id === attempt.id ? "active" : ""}`}
                 onClick={() => setSelected(attempt.id)}
               >
+                <span className="avatar" aria-hidden="true">
+                  {name(attempt.learnerId).charAt(0).toUpperCase()}
+                </span>
                 <span className="attempt-name">
                   {name(attempt.learnerId)}{" "}
-                  {attempt.sample && <small>SAMPLE</small>}
+                  {attempt.sample && (
+                    <small className="sample-tag">Sample</small>
+                  )}{" "}
+                  {edited(attempt, data) && (
+                    <small className="sample-tag edited-tag">
+                      Edited since
+                    </small>
+                  )}
                 </span>
-                <span>
+                <span className="attempt-status">
                   {attempt.mainAssessment
                     ? labels[
                         attempt.reviews.at(-1)?.outcome ??
@@ -251,7 +292,6 @@ export function Teacher({
               key={active.id}
               attempt={active}
               data={data}
-              lesson={lesson}
               learnerId={learnerId}
               onSaved={refresh}
             />
@@ -259,11 +299,9 @@ export function Teacher({
         </div>
       )}
       <div className="integration-note">
-        <span className="section-label">MCP ACCESS</span>
         <p>
-          Read-only MCP tools are available at{" "}
-          <code>{location.origin}/mcp</code> to clients holding the server’s MCP
-          token.
+          MCP clients holding the server’s token can read this desk at{" "}
+          <code>{location.origin}/mcp</code>. Access is read-only.
         </p>
       </div>
     </div>
@@ -272,13 +310,11 @@ export function Teacher({
 function Evidence({
   attempt,
   data,
-  lesson,
   learnerId,
   onSaved,
 }: {
   attempt: Attempt;
-  data: TeacherData;
-  lesson: Lesson;
+  data: TeacherView;
   learnerId: string;
   onSaved: () => Promise<void>;
 }) {
@@ -293,7 +329,9 @@ function Evidence({
   const learner = data.learners.find((l) => l.id === attempt.learnerId),
     main = data.answers.find((a) => a.id === attempt.mainAnswerId),
     answers = data.answers.filter((a) => a.attemptId === attempt.id),
-    mainResult = attempt.mainAssessment;
+    mainResult = attempt.mainAssessment,
+    concept = (id: string) =>
+      attempt.rubric.concepts.find((item) => item.id === id)?.title ?? id;
   async function save() {
     setSaving(true);
     setError("");
@@ -321,17 +359,15 @@ function Evidence({
   return (
     <article className="evidence-detail">
       <div className="evidence-title">
-        <div className="eyebrow">
-          {attempt.sample ? "SAMPLE EVIDENCE" : "SAVED STUDENT EVIDENCE"}
-        </div>
+        {attempt.sample && <p className="sample-tag">Sample evidence</p>}
         <h2>
           {learner?.id === learnerId
             ? "Your explanation"
             : `${learner?.name}’s explanation`}
         </h2>
         <p>
-          {new Date(attempt.createdAt).toLocaleString()} · Pip was{" "}
-          {attempt.profile}
+          Recorded {new Date(attempt.createdAt).toLocaleString()}, with Pip
+          feeling {attempt.rubric.profile}
         </p>
         <span
           className={`result-pill ${current?.outcome ?? mainResult?.outcome ?? ""}`}
@@ -342,19 +378,21 @@ function Evidence({
               ? labels[mainResult.outcome]
               : "Not yet assessed"}
         </span>
-        {learner?.completedAt && (
-          <span className="completion-note">
-            ✦ Completion earned{" "}
-            {new Date(learner.completedAt).toLocaleDateString()}
+        {edited(attempt, data) && (
+          <span className="sample-tag edited-tag">
+            Edited since this attempt. Results use the version the student saw.
           </span>
         )}
       </div>
       {main ? (
         <section className="evidence-section">
-          <div className="section-label">THE ORIGINAL EVIDENCE</div>
-          <p className="provenance">
-            {main.provenance} · {main.transcription}
-          </p>
+          <h3 className="section-title">Original evidence</h3>
+          <dl className="provenance">
+            <dt>Source</dt>
+            <dd>{main.provenance.replaceAll("-", " ")}</dd>
+            <dt>Transcription</dt>
+            <dd>{main.transcription}</dd>
+          </dl>
           {main.audioId ? (
             <audio controls src={`/api/answers/${main.id}/audio`} />
           ) : (
@@ -372,8 +410,8 @@ function Evidence({
             <p>{main.originalTranscript}</p>
             {main.corrections.map((edit, index) => (
               <div className="correction-line" key={index}>
-                {index + 1}. Word {edit.index + 1} · <del>{edit.before}</del> →{" "}
-                <strong>{edit.after}</strong>{" "}
+                <span>Word {edit.index + 1}</span> <del>{edit.before}</del>{" "}
+                <ins>{edit.after}</ins>{" "}
                 <time>{new Date(edit.at).toLocaleTimeString()}</time>
               </div>
             ))}
@@ -388,12 +426,12 @@ function Evidence({
       )}
       {mainResult && (
         <section className="evidence-section">
-          <div className="section-label">
-            AI INTERPRETATION <span>{mainResult.provider}</span>
-          </div>
+          <h3 className="section-title">
+            AI interpretation <span>{mainResult.provider}</span>
+          </h3>
           <p>{mainResult.summary}</p>
           <p className="fine-print">
-            {mainResult.model} · {new Date(mainResult.at).toLocaleString()}
+            Model {mainResult.model}, {new Date(mainResult.at).toLocaleString()}
           </p>
           <div className="criterion-list">
             {mainResult.criteria.map((c) => (
@@ -407,7 +445,7 @@ function Evidence({
                 </span>
                 <div>
                   <h3>
-                    {lesson.concepts.find((item) => item.id === c.id)?.title}
+                    {concept(c.id)}
                     <span>{c.state.replaceAll("-", " ")}</span>
                   </h3>
                   {c.quote && <blockquote>“{c.quote}”</blockquote>}
@@ -419,9 +457,9 @@ function Evidence({
         </section>
       )}
       <section className="evidence-section">
-        <div className="section-label">
-          APPLICATION QUESTIONS <span>Separate diagnostic evidence</span>
-        </div>
+        <h3 className="section-title">
+          Example questions <span>Recorded separately from completion</span>
+        </h3>
         {attempt.diagnostics.length === 0 ? (
           <p className="fine-print">No submitted follow-up answers.</p>
         ) : (
@@ -431,7 +469,7 @@ function Evidence({
               <div className="diagnostic" key={d.answerId}>
                 <h3>
                   {
-                    lesson.followups.find((q) => q.id === d.questionId)
+                    attempt.rubric.followups.find((q) => q.id === d.questionId)
                       ?.question
                   }
                 </h3>
@@ -453,8 +491,8 @@ function Evidence({
                     <p>{answer.originalTranscript}</p>
                     {answer.corrections.map((c, index) => (
                       <p key={index}>
-                        {c.before} → {c.after} ·{" "}
-                        {new Date(c.at).toLocaleTimeString()}
+                        <del>{c.before}</del> <ins>{c.after}</ins>{" "}
+                        <time>{new Date(c.at).toLocaleTimeString()}</time>
                       </p>
                     ))}
                   </details>
@@ -462,12 +500,12 @@ function Evidence({
                 <p>{d.assessment.reason}</p>
                 {d.assessment.observations.map((c) => (
                   <p key={c.id} className="fine-print">
-                    {lesson.concepts.find((item) => item.id === c.id)?.title} ·{" "}
-                    {c.state} · {c.reason}
+                    <b>{concept(c.id)}</b>{" "}
+                    {c.state.replaceAll("-", " ")}. {c.reason}
                   </p>
                 ))}
                 <p className="fine-print">
-                  {d.assessment.provider} · {d.assessment.model} ·{" "}
+                  {d.assessment.provider}, model {d.assessment.model},{" "}
                   {new Date(d.assessment.at).toLocaleString()}
                 </p>
               </div>
@@ -477,8 +515,8 @@ function Evidence({
       </section>
       {mainResult && main && (
         <section className="evidence-section review-section">
-          <div className="section-label">YOUR JUDGMENT</div>
-          <h2>The teacher has the final say.</h2>
+          <h3 className="section-title">Your judgment</h3>
+          <p>You have the final say. Pip’s reading is only a proposal.</p>
           <div className="review-radios">
             <label>
               <input
@@ -500,7 +538,7 @@ function Evidence({
           {action === "correct" &&
             criteria.map((c, index) => (
               <label className="review-criterion" key={c.id}>
-                {lesson.concepts.find((item) => item.id === c.id)?.title}
+                {concept(c.id)}
                 <select
                   value={c.state}
                   onChange={(event) => {
@@ -526,16 +564,16 @@ function Evidence({
             <textarea
               value={note}
               onChange={(event) => setNote(event.target.value)}
-              placeholder="Explain your judgment for the evidence history."
+              placeholder="Why you accepted or corrected it. This is kept in the review history."
               rows={3}
             />
           </label>
           <button
-            className="button primary"
+            className="choice choice-primary"
             disabled={!note.trim() || saving}
             onClick={() => void save()}
           >
-            {saving ? "Saving review…" : "Save teacher review"}
+            {saving ? "Saving review" : "Save review"}
           </button>
           {error && <p className="error">{error}</p>}
           <p className="fine-print">
@@ -546,12 +584,12 @@ function Evidence({
       )}
       {attempt.reviews.length > 0 && (
         <section className="evidence-section">
-          <div className="section-label">TEACHER REVIEW HISTORY</div>
+          <h3 className="section-title">Review history</h3>
           {attempt.reviews.map((review) => (
             <div className="review-audit" key={review.id}>
               <strong>
-                {review.action === "accept" ? "Accepted" : "Corrected"} ·{" "}
-                {labels[review.outcome]}
+                {review.action === "accept" ? "Accepted" : "Corrected"}:{" "}
+                {labels[review.outcome].toLowerCase()}
               </strong>
               <p>{review.note}</p>
               <time>{new Date(review.at).toLocaleString()}</time>
@@ -572,4 +610,34 @@ function stateSchema(value: string): Criterion["state"] {
     default:
       throw new Error("Unknown criterion state.");
   }
+}
+
+function Bucket({
+  kind,
+  label,
+  ids,
+  name,
+  empty,
+}: {
+  kind: "gap" | "resolved" | "unassessed";
+  label: string;
+  ids: string[];
+  name: (id: string) => string;
+  empty: string;
+}) {
+  return (
+    <div className={`bucket bucket-${kind}`}>
+      <span className="bucket-label">{label}</span>
+      <b>{ids.length}</b>
+      {ids.length === 0 ? (
+        <p>{empty}</p>
+      ) : (
+        <ul>
+          {ids.map((id) => (
+            <li key={id}>{name(id)}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }

@@ -189,84 +189,119 @@ export function Recorder({
       );
     }
   }
+  const left = state.kind === "review" ? 3 - state.answer.corrections.length : 3;
   return (
     <div className={`recorder recorder-${state.kind}`}>
       {state.kind === "idle" && (
         <>
-          <button
-            className="record-button"
-            onClick={() => void start()}
-            aria-label={
-              kind === "main" ? "Record explanation" : "Record answer"
-            }
-          >
-            <span className="mic-symbol">♩</span>
-          </button>
-          <div className="record-invitation">
-            {kind === "main"
-              ? "Ready when you are."
-              : "Take your time. I’m listening."}
-          </div>
-          <div className="recorder-actions">
-            <button className="button primary" onClick={() => void start()}>
-              {kind === "main" ? "Record explanation" : "Record answer"}
-            </button>
+          <div className="record-row">
             <button
-              className="text-button"
-              onClick={() => fileInput.current?.click()}
+              className="record-button"
+              onClick={() => void start()}
+              aria-label={
+                kind === "main" ? "Record explanation" : "Record answer"
+              }
             >
-              Upload a recording
+              <span className="record-dot" />
             </button>
+            <div>
+              <p className="record-invitation">
+                {kind === "main"
+                  ? "Press record and explain it the way you'd tell a friend."
+                  : "Take your time. There's no timer."}
+              </p>
+              <div className="choices choices-inline">
+                <button
+                  className="choice choice-primary"
+                  onClick={() => void start()}
+                >
+                  {kind === "main" ? "Record explanation" : "Record answer"}
+                </button>
+                <button
+                  className="choice"
+                  onClick={() => fileInput.current?.click()}
+                >
+                  Upload a recording
+                </button>
+                {attempt.sample && (
+                  <button className="choice" onClick={() => void sample()}>
+                    Use the prepared sample transcript
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-          {attempt.sample && (
-            <button className="sample-action" onClick={() => void sample()}>
-              Use the prepared sample transcript →
-            </button>
-          )}
-          <p className="fine-print">
-            English · Recordings up to 4 MB · Review before you send
+          <p className="recorder-note">
+            English only. Recordings up to 4 MB. You check the words before
+            anything is sent.
           </p>
         </>
       )}
       {state.kind === "recording" && (
-        <>
-          <div className="recording-wave" aria-label="Recording">
-            <i />
-            <i />
-            <i />
-            <i />
-            <i />
-            <i />
-            <i />
-          </div>
-          <p>Recording your voice</p>
+        <div className="record-row">
           <button
-            className="button primary"
+            className="record-button is-recording"
             onClick={() => recorder.current?.stop()}
+            aria-label="Stop recording"
           >
-            ■ Stop recording
+            <span className="record-stop" />
           </button>
-        </>
+          <div>
+            <div className="recording-wave" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+              <i />
+              <i />
+              <i />
+              <i />
+            </div>
+            <p className="record-invitation" role="status">
+              Recording. Press stop when you're done.
+            </p>
+            <div className="choices choices-inline">
+              <button
+                className="choice choice-primary"
+                onClick={() => recorder.current?.stop()}
+              >
+                Stop recording
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {state.kind === "processing" && (
-        <div className="processing">
-          <span className="thinking-dots">•••</span>
-          <p>Turning your voice into words</p>
-          <p className="fine-print">Your original recording stays saved.</p>
+        <div className="processing" role="status">
+          <span className="thinking-dots">
+            <i />
+            <i />
+            <i />
+          </span>
+          <p>Turning your voice into words. Your recording is already saved.</p>
         </div>
       )}
       {state.kind === "review" && (
         <div className="transcript-review">
-          <div className="section-label">
-            REVIEW YOUR WORDS{" "}
-            <span>{3 - state.answer.corrections.length} corrections left</span>
+          <div className="review-head">
+            <h3>Check your words</h3>
+            <div
+              className="chalk-count"
+              aria-label={`${left} word ${left === 1 ? "fix" : "fixes"} left`}
+            >
+              {[0, 1, 2].map((i) => (
+                <i key={i} className={i < left ? "" : "used"} />
+              ))}
+              <span>
+                {left} {left === 1 ? "fix" : "fixes"} left
+              </span>
+            </div>
           </div>
           {state.answer.audioId && (
             <audio controls src={`/api/answers/${state.answer.id}/audio`} />
           )}
           {state.answer.provenance === "scripted-sample" && (
-            <p className="sample-label">
-              Prepared sample transcript · No recording or speech recognition
+            <p className="sample-tag">
+              Prepared sample words. No recording or speech recognition.
             </p>
           )}
           {state.answer.originalTranscript ? (
@@ -277,6 +312,7 @@ export function Recorder({
                     key={index}
                     disabled={state.answer.corrections.length >= 3}
                     className={selected === index ? "selected" : ""}
+                    aria-pressed={selected === index}
                     onClick={() => {
                       setSelected(index);
                       setReplacement(word);
@@ -286,18 +322,20 @@ export function Recorder({
                   </button>
                 ))}
               </p>
-              <p className="fine-print">
-                Click a word to replace it. Up to three replacements. For a
-                bigger change, record again.
+              <p className="recorder-note">
+                Click a misheard word to fix it. For a bigger change, record
+                again.
               </p>
             </>
           ) : (
-            <button
-              className="button"
-              onClick={() => void retryTranscription(state.answer)}
-            >
-              Retry transcription
-            </button>
+            <div className="choices">
+              <button
+                className="choice"
+                onClick={() => void retryTranscription(state.answer)}
+              >
+                Retry transcription
+              </button>
+            </div>
           )}
           {selected !== null && (
             <form
@@ -308,7 +346,7 @@ export function Recorder({
               }}
             >
               <label>
-                Replace one word
+                Replace “{words(reviewedTranscript(state.answer))[selected]}” with
                 <input
                   value={replacement}
                   onChange={(event) => setReplacement(event.target.value)}
@@ -317,11 +355,11 @@ export function Recorder({
                   autoFocus
                 />
               </label>
-              <button className="button" type="submit">
+              <button className="choice choice-primary" type="submit">
                 Replace word
               </button>
               <button
-                className="text-button"
+                className="choice"
                 type="button"
                 onClick={() => setSelected(null)}
               >
@@ -330,23 +368,24 @@ export function Recorder({
             </form>
           )}
           {state.answer.corrections.length > 0 && (
-            <p className="fine-print">
-              Edits saved{" "}
-              {state.answer.corrections
-                .map((c) => `${c.before} → ${c.after}`)
-                .join(" · ")}
-            </p>
+            <ol className="correction-list" aria-label="Your fixes">
+              {state.answer.corrections.map((c, index) => (
+                <li key={index}>
+                  <del>{c.before}</del> <ins>{c.after}</ins>
+                </li>
+              ))}
+            </ol>
           )}
-          <div className="recorder-actions">
+          <div className="choices choices-inline">
             <button
-              className="button primary"
+              className="choice choice-primary"
               disabled={!state.answer.originalTranscript}
               onClick={() => void submit(state.answer)}
             >
               {kind === "main" ? "Send to Pip" : "Send answer"}
             </button>
             <button
-              className="text-button"
+              className="choice"
               onClick={() => {
                 setSelected(null);
                 setState({ kind: "idle" });

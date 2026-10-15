@@ -1,35 +1,20 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { z } from "zod";
 import {
-  answerSchema,
-  attemptSchema,
-  bootstrapSchema,
-  reviewedTranscript,
-  type Answer,
-  type Attempt,
-  type Bootstrap,
   type Me,
-  type Profile,
   meSchema,
   signInOptionsSchema,
   type SignInOptions,
 } from "../shared/contracts.js";
 import { api, json } from "./api.js";
-import { Recorder } from "./Recorder.js";
-import { Scene } from "./Scene.js";
+import { AssignmentPage } from "./Assignment.js";
+import { AssignmentForm } from "./AssignmentForm.js";
+import { CoursePage, StudentHome } from "./Courses.js";
+import { href, useRoute, type Route } from "./route.js";
 import { Teacher } from "./Teacher.js";
+import { DeskHome, TeacherCoursePage } from "./TeacherCourses.js";
+import { Typed } from "./Typed.js";
 
-type StudentStage =
-  | { kind: "assignment" }
-  | { kind: "record"; attempt: Attempt; initialAnswer: Answer | null }
-  | { kind: "preparing"; attempt: Attempt; answer: Answer }
-  | {
-      kind: "scene";
-      attempt: Attempt;
-      answer: Answer;
-      diagnosticAnswers: Answer[];
-    }
-  | { kind: "finished"; attempt: Attempt };
 type Session =
   | { kind: "checking" }
   | { kind: "signed-out"; options: SignInOptions }
@@ -62,51 +47,56 @@ export function App() {
   if (session.kind === "signed-in")
     return <Classroom me={session.me} onSignOut={signOut} />;
   return (
-    <>
-      <main className="signin-page">
-        <img
-          src="/art/child-listening.svg"
-          alt="Pip, your curious learning partner"
-        />
-        <div className="eyebrow">
-          <span className="tiny-star">✦</span> FEYN · LEARN IT BY TEACHING IT
+    <main className="signin">
+      <div className="signin-card">
+        <img className="signin-logo" src="/brand/feyn-logo.png" alt="Feyn" />
+        <p className="signin-tagline">Learn an idea by teaching it to Pip.</p>
+        <div className="pip-says">
+          <img className="pixel-avatar" src="/art/child-listening.png" alt="" />
+          <p className="bubble">
+            <Typed text="Hi, I'm Pip! Will you teach me something today? Sign in so I remember what you taught me." />
+          </p>
         </div>
-        <h1>
-          Explain one idea to Pip.
-          <br />
-          <em>Watch it click.</em>
-        </h1>
-        <p>Sign in so your explanations and completion stay with you.</p>
         {session.kind === "checking" ? (
-          <span className="thinking-dots">•••</span>
+          <span className="thinking-dots" role="status">
+            <i />
+            <i />
+            <i />
+            <span className="visually-hidden">Checking your sign-in</span>
+          </span>
+        ) : session.options.google ? (
+          <a
+            className="choice choice-primary choice-wide"
+            href="/api/auth/google"
+          >
+            Sign in with Google
+          </a>
         ) : (
-          <>
-            {session.options.google ? (
-              <a className="button primary" href="/api/auth/google">
-                Sign in with Google
-              </a>
-            ) : (
-              <p className="fine-print">
-                Google sign-in is not configured on this server.
-              </p>
-            )}
-            {session.options.devLogin && (
-              <form className="dev-login" action="/api/auth/dev" method="get">
-                <span className="section-label">LOCAL TEST ACCOUNT</span>
-                <input name="email" type="email" required placeholder="Email" />
-                <input name="name" placeholder="Name" />
-                <button className="button">Sign in locally</button>
-              </form>
-            )}
-          </>
+          <p className="fine-print">
+            Google sign-in isn't set up on this server.
+          </p>
+        )}
+        {session.kind === "signed-out" && session.options.devLogin && (
+          <form className="dev-login" action="/api/auth/dev" method="get">
+            <h2>Local test account</h2>
+            <label>
+              Email
+              <input name="email" type="email" required autoComplete="off" />
+            </label>
+            <label>
+              Name
+              <input name="name" autoComplete="off" />
+            </label>
+            <button className="choice">Sign in locally</button>
+          </form>
         )}
         {failure && (
           <p className="error" role="alert">
             {failure}
           </p>
         )}
-      </main>
-    </>
+      </div>
+    </main>
   );
 }
 function Classroom({
@@ -116,456 +106,127 @@ function Classroom({
   me: Me;
   onSignOut: () => Promise<void>;
 }) {
-  const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null),
-    [view, setView] = useState<"student" | "teacher">("student"),
-    [stage, setStage] = useState<StudentStage>({ kind: "assignment" }),
-    [error, setError] = useState(""),
-    [processing, setProcessing] = useState(false),
-    [reviewed, setReviewed] = useState(false),
-    [brandMissing, setBrandMissing] = useState(false),
-    [teacherAttemptId, setTeacherAttemptId] = useState<string | null>(null);
-  async function load() {
-    const data = await api("/bootstrap", bootstrapSchema);
-    setBootstrap(data);
-    return data;
-  }
-  useEffect(() => {
-    void load().catch((e) =>
-      setError(e instanceof Error ? e.message : "Could not reach Feyn."),
-    );
-  }, []);
-  async function start(sample: boolean) {
-    if (!bootstrap) return;
-    setError("");
-    try {
-      const attempt = await api(
-        "/attempts",
-        attemptSchema,
-        json("POST", {
-          profile: bootstrap.profile,
-          sample,
-          reviewedOpportunity: reviewed,
-        }),
-      );
-      setStage({ kind: "record", attempt, initialAnswer: null });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not begin.");
-    }
-  }
-  async function submitMain(answer: Answer) {
-    if (stage.kind !== "record") return;
-    const attempt = stage.attempt;
-    setStage({ kind: "preparing", attempt, answer });
-    try {
-      const result = await api(
-        `/attempts/${attempt.id}/submit`,
-        attemptSchema,
-        json("POST", { answerId: answer.id }),
-      );
-      setStage({
-        kind: "scene",
-        attempt: result,
-        answer,
-        diagnosticAnswers: [],
-      });
-      await load();
-    } catch (e) {
-      setStage({ kind: "record", attempt, initialAnswer: answer });
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Assessment could not finish. Your recording is saved.",
-      );
-    }
-  }
-  async function submitDiagnostic(answer: Answer) {
-    if (stage.kind !== "scene") return;
-    setProcessing(true);
-    try {
-      const result = await api(
-        `/attempts/${stage.attempt.id}/submit`,
-        attemptSchema,
-        json("POST", { answerId: answer.id }),
-      );
-      setStage({
-        ...stage,
-        attempt: result,
-        diagnosticAnswers: [...stage.diagnosticAnswers, answer],
-      });
-      await load();
-    } finally {
-      setProcessing(false);
-    }
-  }
-  async function finish() {
-    if (stage.kind !== "scene") return;
-    const attempt = await api(
-      `/attempts/${stage.attempt.id}/finish`,
-      attemptSchema,
-      json("POST", {}),
-    );
-    setStage({ kind: "finished", attempt });
-    await load();
-  }
-  async function changeProfile(profile: Profile) {
-    await api(
-      "/profile",
-      z.object({ profile: z.enum(["curious", "playful"]) }),
-      json("PUT", { profile }),
-    );
-    await load();
-  }
-  const lesson = bootstrap?.lesson;
+  const route = useRoute(),
+    [context, setContext] = useState("");
+  const teaching =
+    me.role === "teacher" &&
+    (route.kind === "desk" ||
+      route.kind === "teach-course" ||
+      route.kind === "evidence" ||
+      route.kind === "edit");
   return (
-    <>
-      <header className="site-header">
+    <div className="app">
+      <header className="appbar">
         <a
-          className="wordmark"
-          aria-label="Feyn home"
-          href="#"
-          onClick={(event) => {
-            event.preventDefault();
-            setView("student");
-          }}
+          className="appbar-brand"
+          aria-label="Feyn, back to your courses"
+          href={href({ kind: "courses" })}
         >
-          {!brandMissing && (
-            <img
-              src="/brand/feyn-logo.png"
-              alt=""
-              onError={() => setBrandMissing(true)}
-            />
-          )}
-          <span>
-            feyn<span className="brand-dot">✦</span>
-          </span>
+          <img src="/brand/feyn-logo.png" alt="" />
         </a>
-        <nav aria-label="Main navigation">
-          <button
-            className={view === "student" ? "active" : ""}
-            onClick={() => setView("student")}
+        {context && (
+          <p className="appbar-class">
+            <span>{context}</span>
+          </p>
+        )}
+        <nav className="appbar-tabs" aria-label="Main navigation">
+          <a
+            aria-current={!teaching ? "page" : undefined}
+            href={href({ kind: "courses" })}
           >
-            Your classroom
-          </button>
+            Courses
+          </a>
           {me.role === "teacher" && (
-            <button
-              className={view === "teacher" ? "active" : ""}
-              onClick={() => {
-                setTeacherAttemptId(null);
-                setView("teacher");
-              }}
+            <a
+              aria-current={teaching ? "page" : undefined}
+              href={href({ kind: "desk" })}
             >
-              Teacher’s desk
-            </button>
+              Teacher's desk
+            </a>
           )}
         </nav>
-        <div className="header-note">
-          A little teaching. A lot of understanding.
-        </div>
         <div className="account">
-          <span title={me.email}>{me.name}</span>
-          <button className="text-button" onClick={() => void onSignOut()}>
+          <span className="avatar" aria-hidden="true">
+            {initial(me.name)}
+          </span>
+          <span className="account-name" title={me.email}>
+            {me.name}
+          </span>
+          <button className="link-button" onClick={() => void onSignOut()}>
             Sign out
           </button>
         </div>
       </header>
-      <main>
-        {!bootstrap ? (
-          <div className="opening">
-            <span className="thinking-dots">•••</span>
-            <p>{error || "Opening your classroom"}</p>
-          </div>
-        ) : view === "teacher" && me.role === "teacher" ? (
-          <Teacher
-            selectedAttemptId={teacherAttemptId}
-            lesson={bootstrap.lesson}
-            learnerId={bootstrap.learner.id}
-            profile={bootstrap.profile}
-            onProfile={changeProfile}
-          />
-        ) : (
-          <>
-            {error && (
-              <div className="global-error" role="alert">
-                {error}
-                <button onClick={() => setError("")} aria-label="Dismiss error">
-                  ×
-                </button>
-              </div>
-            )}
-            {stage.kind === "assignment" && lesson && (
-              <div className="assignment-page">
-                <div className="lesson-intro">
-                  <div className="eyebrow">
-                    <span className="tiny-star">✦</span> LEARN IT BY TEACHING IT
-                  </div>
-                  <h1>
-                    You’ve got an idea.
-                    <br />
-                    <em>Help it click for Pip.</em>
-                  </h1>
-                  <p className="intro-copy">
-                    A small classroom. A curious mind.
-                    <br />
-                    Explain it in your own words and see what happens.
-                  </p>
-                  <div className="lesson-meta">
-                    <span>01</span>
-                    <div>
-                      <b>{lesson.title}</b>
-                      <small>{lesson.subject}</small>
-                    </div>
-                  </div>
-                  <div className="intro-footer">
-                    <img
-                      src="/art/child-listening.svg"
-                      alt="Pip, your curious learning partner"
-                    />
-                    <p>
-                      “I know what distance is.
-                      <br />
-                      But what does speed mean for one moment?”
-                      <span>
-                        PIP · YOUR {bootstrap.profile.toUpperCase()} LISTENER
-                      </span>
-                    </p>
-                  </div>
-                </div>
-                <section className="lesson-paper">
-                  <div className="paper-top">
-                    <span className="section-label">YOUR TEACHING PROMPT</span>
-                    <span className="paper-number">LESSON 001</span>
-                  </div>
-                  <div className="formula-strip">
-                    <span>s(t) = t²</span>
-                    <div>
-                      distance in meters
-                      <br />
-                      time in seconds
-                    </div>
-                    <div className="cart-doodle">
-                      ▱<i />
-                      <i />
-                    </div>
-                  </div>
-                  <h2>
-                    What does speed mean
-                    <br />
-                    at exactly three seconds?
-                  </h2>
-                  <p>{lesson.question}</p>
-                  <div className="paper-rule" />
-                  <div className="what-to-do">
-                    <span className="step-number">1</span>
-                    <div>
-                      <b>Explain it aloud.</b>
-                      <p>
-                        Help Pip understand the meaning, not just the formula.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="what-to-do">
-                    <span className="step-number">2</span>
-                    <div>
-                      <b>Explore an example together.</b>
-                      <p>
-                        Pip asks a question. You take all the time you need.
-                      </p>
-                    </div>
-                  </div>
-                  {bootstrap.learner.completedAt && (
-                    <div className="earned-completion">
-                      ✦ You’ve completed this explanation. More practice keeps
-                      your completion.
-                    </div>
-                  )}
-                  {bootstrap.attempts.length > 0 && (
-                    <label className="review-opportunity">
-                      <input
-                        type="checkbox"
-                        checked={reviewed}
-                        onChange={(event) => setReviewed(event.target.checked)}
-                      />{" "}
-                      I reviewed the material and am trying a fresh explanation.
-                    </label>
-                  )}
-                  <button
-                    className="button primary start-button"
-                    onClick={() => void start(false)}
-                  >
-                    Enter the classroom <span>→</span>
-                  </button>
-                  <button
-                    className="sample-link"
-                    onClick={() => void start(true)}
-                  >
-                    Take a clearly labeled sample walkthrough
-                  </button>
-                  <div className="provider-line">
-                    <span
-                      className={
-                        bootstrap.providers.transcription ? "ready" : "missing"
-                      }
-                    />{" "}
-                    {bootstrap.providers.transcription
-                      ? "Speech recognition configured"
-                      : "Speech recognition needs a server key"}{" "}
-                    <span
-                      className={
-                        bootstrap.providers.assessment ? "ready" : "missing"
-                      }
-                    />{" "}
-                    {bootstrap.providers.assessment
-                      ? bootstrap.providers.assessor
-                      : "Sample mode available"}
-                  </div>
-                </section>
-                <div className="assignment-bottom">
-                  <span>Speak. Reflect. Make it your own.</span>
-                  <span>One lesson at a time.</span>
-                </div>
-              </div>
-            )}
-            {stage.kind === "record" && lesson && (
-              <div className="record-page">
-                <button
-                  className="back-link"
-                  onClick={() => setStage({ kind: "assignment" })}
-                >
-                  ← Back to your lesson
-                </button>
-                <div className="record-layout">
-                  <section className="record-context">
-                    <div className="eyebrow">YOUR TURN TO TEACH</div>
-                    <h1>
-                      Make a moment
-                      <br />
-                      <em>make sense.</em>
-                    </h1>
-                    <p>{lesson.question}</p>
-                    <div className="formula-note">
-                      s(t) = t² <small>What happens at t = 3?</small>
-                    </div>
-                    <div className="record-pip">
-                      <img src="/art/child-listening.svg" alt="Pip listening" />
-                      <p>
-                        “I’m all ears.”<span>PIP</span>
-                      </p>
-                    </div>
-                  </section>
-                  <section className="record-paper">
-                    <div className="section-label">
-                      YOUR EXPLANATION{" "}
-                      {stage.attempt.sample && <span>SAMPLE WALKTHROUGH</span>}
-                    </div>
-                    {stage.attempt.sample && (
-                      <p className="sample-notice">
-                        This walkthrough uses prepared words. Choose the sample
-                        transcript below, or upload synthetic audio to exercise
-                        real speech recognition.
-                      </p>
-                    )}
-                    <Recorder
-                      key={stage.attempt.id}
-                      attempt={stage.attempt}
-                      kind="main"
-                      initialAnswer={stage.initialAnswer}
-                      onSubmit={submitMain}
-                    />
-                    <p className="fine-print">
-                      Audio is sent to ElevenLabs for transcription. Reviewed
-                      text is sent to the configured AI assessor.
-                    </p>
-                    <div className="record-guidance">
-                      <span>✧</span>
-                      <p>
-                        Think of a friend who’s seeing this for the first time.
-                        <br />A clear example can go a long way.
-                      </p>
-                    </div>
-                  </section>
-                </div>
-              </div>
-            )}
-            {stage.kind === "preparing" && (
-              <div className="preparing-page" role="status">
-                <div className="preparing-art">
-                  <img src="/art/child-thinking.svg" alt="Pip thinking" />
-                  <span className="thinking-dots">•••</span>
-                </div>
-                <div className="eyebrow">GETTING THE CLASSROOM READY</div>
-                <h1>Preparing scenarios</h1>
-                <p>Pip is finding a question for your explanation.</p>
-                <p className="fine-print">
-                  Your complete explanation is being assessed against the lesson
-                  criteria.
-                </p>
-              </div>
-            )}
-            {stage.kind === "scene" && lesson && (
-              <Scene
-                attempt={stage.attempt}
-                answer={stage.answer}
-                diagnosticAnswers={stage.diagnosticAnswers}
-                lesson={lesson}
-                onSubmit={submitDiagnostic}
-                onFinish={finish}
-                onRetry={() => start(stage.attempt.sample)}
-                processing={processing}
-              />
-            )}
-            {stage.kind === "finished" && (
-              <div className="finished-page">
-                <img
-                  src={`/art/child-${stage.attempt.mainAssessment?.outcome === "pass" ? "aha" : "listening"}.svg`}
-                  alt="Pip"
-                />
-                <div className="eyebrow">UNTIL NEXT TIME</div>
-                <h1>
-                  {stage.attempt.mainAssessment?.outcome === "pass"
-                    ? "A little clearer."
-                    : "Keep the curiosity."}
-                </h1>
-                <p>
-                  {stage.attempt.mainAssessment?.outcome === "pass"
-                    ? "Your main explanation earned completion. The examples stay in your learning history."
-                    : "Your explanation and examples are saved. You can review and try again whenever you’re ready."}
-                </p>
-                {bootstrap.learner.completedAt &&
-                  stage.attempt.mainAssessment?.outcome !== "pass" && (
-                    <p className="earned-completion">
-                      Your earlier earned completion is still yours.
-                    </p>
-                  )}
-                <div className="recorder-actions">
-                  <button
-                    className="button primary"
-                    onClick={() => setStage({ kind: "assignment" })}
-                  >
-                    Back to your lesson
-                  </button>
-                  {me.role === "teacher" && (
-                    <button
-                      className="button"
-                      onClick={() => {
-                        setTeacherAttemptId(stage.attempt.id);
-                        setView("teacher");
-                      }}
-                    >
-                      Open teacher evidence →
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </>
-        )}
+      <main className="page">
+        <Page route={route} me={me} setContext={setContext} />
       </main>
       <footer className="site-footer">
-        <span>
-          feyn <span>✦</span> Ideas grow when you share them.
-        </span>
-        <span>Prototype · Evidence saved on the Feyn server</span>
+        Prototype. Evidence is saved on the Feyn server.
       </footer>
-    </>
+    </div>
   );
+}
+function Page({
+  route,
+  me,
+  setContext,
+}: {
+  route: Route;
+  me: Me;
+  setContext: (text: string) => void;
+}) {
+  if (me.role !== "teacher" && route.kind !== "course" && route.kind !== "assignment")
+    return <StudentHome setContext={setContext} />;
+  switch (route.kind) {
+    case "courses":
+      return <StudentHome setContext={setContext} />;
+    case "course":
+      return (
+        <CoursePage
+          key={route.courseId}
+          courseId={route.courseId}
+          setContext={setContext}
+        />
+      );
+    case "assignment":
+      return (
+        <AssignmentPage
+          key={route.assignmentId}
+          assignmentId={route.assignmentId}
+          me={me}
+          setContext={setContext}
+        />
+      );
+    case "desk":
+      return <DeskHome setContext={setContext} />;
+    case "teach-course":
+      return (
+        <TeacherCoursePage
+          key={route.courseId}
+          courseId={route.courseId}
+          setContext={setContext}
+        />
+      );
+    case "evidence":
+      return (
+        <Teacher
+          key={`${route.assignmentId}/${route.attemptId}`}
+          assignmentId={route.assignmentId}
+          selectedAttemptId={route.attemptId}
+          learnerId={me.learnerId}
+          setContext={setContext}
+        />
+      );
+    case "edit":
+      return (
+        <AssignmentForm
+          key={route.assignmentId}
+          assignmentId={route.assignmentId}
+          setContext={setContext}
+        />
+      );
+  }
+}
+function initial(name: string) {
+  return name.trim().charAt(0).toUpperCase() || "?";
 }
