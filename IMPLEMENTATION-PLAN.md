@@ -50,4 +50,4 @@
 - [x] Review provider labels and processing disclosure.
 - [x] Recheck microphone lifetime, local access, diagnostic schema, and conservative support scope after independent review.
 - [x] Archive synthetic verification data without deleting evidence and leave a fresh real learner.
-- [ ] Push the reviewed initial repository and verify remote visibility and commit.
+- [x] Push the reviewed initial repository and verify remote visibility and commit.
