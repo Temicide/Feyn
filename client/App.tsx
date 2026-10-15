@@ -162,9 +162,6 @@ function Classroom({
       <main className="page">
         <Page route={route} me={me} setContext={setContext} />
       </main>
-      <footer className="site-footer">
-        Prototype. Evidence is saved on the Feyn server.
-      </footer>
     </div>
   );
 }
