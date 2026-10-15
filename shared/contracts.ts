@@ -49,7 +49,7 @@ export const answerSchema = z.object({
   kind: z.enum(["main", "followup-1", "followup-2"]),
   originalTranscript: z.string(),
   corrections: z.array(correctionSchema).max(3),
-  audioPath: z.string().nullable(),
+  audioId: z.string().nullable(),
   audioMetadata: z
     .object({ filename: z.string(), mime: z.string() })
     .nullable()

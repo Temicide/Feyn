@@ -19,11 +19,13 @@ const labels = {
 };
 export function Teacher({
   lesson,
+  learnerId,
   profile,
   onProfile,
   selectedAttemptId,
 }: {
   lesson: Lesson;
+  learnerId: string;
   profile: Profile;
   selectedAttemptId: string | null;
   onProfile: (profile: Profile) => Promise<void>;
@@ -48,7 +50,7 @@ export function Teacher({
       ) ?? [],
     active =
       attempts.find((a) => a.id === selected) ??
-      attempts.find((a) => a.learnerId === "you") ??
+      attempts.find((a) => a.learnerId === learnerId) ??
       attempts[0];
   const name = (id: string) =>
     data?.learners.find((l) => l.id === id)?.name ?? id;
@@ -208,6 +210,7 @@ export function Teacher({
               attempt={active}
               data={data}
               lesson={lesson}
+              learnerId={learnerId}
               onSaved={refresh}
             />
           )}
@@ -228,11 +231,13 @@ function Evidence({
   attempt,
   data,
   lesson,
+  learnerId,
   onSaved,
 }: {
   attempt: Attempt;
   data: TeacherData;
   lesson: Lesson;
+  learnerId: string;
   onSaved: () => Promise<void>;
 }) {
   const current = attempt.reviews.at(-1),
@@ -278,7 +283,7 @@ function Evidence({
           {attempt.sample ? "SAMPLE EVIDENCE" : "SAVED STUDENT EVIDENCE"}
         </div>
         <h2>
-          {learner?.id === "you"
+          {learner?.id === learnerId
             ? "Your explanation"
             : `${learner?.name}’s explanation`}
         </h2>
@@ -308,7 +313,7 @@ function Evidence({
           <p className="provenance">
             {main.provenance} · {main.transcription}
           </p>
-          {main.audioPath ? (
+          {main.audioId ? (
             <audio controls src={`/api/answers/${main.id}/audio`} />
           ) : (
             <p className="fine-print">
@@ -391,7 +396,7 @@ function Evidence({
                 <span className={`result-pill ${d.assessment.outcome}`}>
                   {d.assessment.outcome.replaceAll("-", " ")}
                 </span>
-                {answer?.audioPath && (
+                {answer?.audioId && (
                   <audio controls src={`/api/answers/${answer.id}/audio`} />
                 )}
                 <blockquote>

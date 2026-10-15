@@ -1,11 +1,7 @@
-import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
 import { z } from "zod";
 import {
-  answerSchema,
-  attemptSchema,
-  learnerSchema,
+  profileSchema,
   reviewedTranscript,
   words,
   type Answer,
@@ -19,7 +15,17 @@ import {
 } from "../shared/contracts.js";
 import { deriveOutcome } from "./providers.js";
 import { lesson } from "./lesson.js";
+import type { Kind, RecordStore, Records } from "./store.js";
 
+export function walkthroughId(learnerId: string): string {
+  return `walkthrough:${learnerId}`;
+}
+export function belongsTo(attempt: Attempt, learnerId: string): boolean {
+  return (
+    attempt.learnerId === learnerId ||
+    attempt.learnerId === walkthroughId(learnerId)
+  );
+}
 export function replaceWord(
   answer: Answer,
   index: number,
@@ -135,102 +141,76 @@ export function projectRecap(
 }
 
 export class Attempts {
-  private db: DatabaseSync;
-  constructor(path = "data/lesson.sqlite") {
-    if (path !== ":memory:") mkdirSync("data", { recursive: true });
-    this.db = new DatabaseSync(path);
-    this.db.exec(
-      "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records (kind TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(kind,id)); CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
-    );
-    if (!this.all("learner", learnerSchema).length) {
-      this.save("learner", {
-        id: "you",
-        name: "You",
-        sample: false,
-        completedAt: null,
-      });
-      for (const [id, name] of [
-        ["sample-maya", "Maya"],
-        ["sample-noah", "Noah"],
-        ["sample-eli", "Eli"],
-        ["sample-june", "June"],
-        ["sample-you", "You · walkthrough"],
-      ])
-        if (id && name)
-          this.save("learner", { id, name, sample: true, completedAt: null });
-      this.seedSamples();
-    }
-    if (!this.learners().some((l) => l.id === "sample-you"))
-      this.save("learner", {
-        id: "sample-you",
-        name: "You · walkthrough",
-        sample: true,
-        completedAt: null,
-      });
+  private seeded: Promise<void> | null = null;
+  constructor(private store: RecordStore) {}
+  private async list<K extends Kind>(kind: K): Promise<Records[K][]> {
+    this.seeded ??= this.seedSamples().catch((error: unknown) => {
+      this.seeded = null;
+      throw error;
+    });
+    await this.seeded;
+    return this.store.list(kind);
   }
-  private all<T>(kind: string, schema: z.ZodType<T>): T[] {
-    return this.db
-      .prepare("SELECT body FROM records WHERE kind=? ORDER BY rowid")
-      .all(kind)
-      .map((row) => {
-        const r = z.object({ body: z.string() }).parse(row);
-        return schema.parse(JSON.parse(r.body));
-      });
+  learners(): Promise<Learner[]> {
+    return this.list("learner");
   }
-  private save<T extends { id: string }>(kind: string, value: T): void {
-    this.db
-      .prepare(
-        "INSERT INTO records(kind,id,body) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET body=excluded.body",
-      )
-      .run(kind, value.id, JSON.stringify(value));
+  attempts(): Promise<Attempt[]> {
+    return this.list("attempt");
   }
-  learners(): Learner[] {
-    return this.all("learner", learnerSchema);
+  answers(): Promise<Answer[]> {
+    return this.list("answer");
   }
-  learner(): Learner {
-    const found = this.learners().find((l) => l.id === "you");
+  async learner(id: string): Promise<Learner> {
+    const found = (await this.learners()).find((l) => l.id === id);
     if (!found) throw new Error("Learner missing.");
     return found;
   }
-  attempts(): Attempt[] {
-    return this.all("attempt", attemptSchema);
+  async signIn(id: string, name: string): Promise<Learner> {
+    const existing = (await this.learners()).find((l) => l.id === id);
+    const learner = existing
+      ? { ...existing, name }
+      : { id, name, sample: false, completedAt: null };
+    await this.store.put("learner", learner);
+    return learner;
   }
-  answers(): Answer[] {
-    return this.all("answer", answerSchema);
-  }
-  get(id: string): Attempt {
-    const found = this.attempts().find((a) => a.id === id);
+  async get(id: string): Promise<Attempt> {
+    const found = (await this.attempts()).find((a) => a.id === id);
     if (!found) throw new Error("Attempt not found.");
     return found;
   }
-  answer(id: string): Answer {
-    const found = this.answers().find((a) => a.id === id);
+  async answer(id: string): Promise<Answer> {
+    const found = (await this.answers()).find((a) => a.id === id);
     if (!found) throw new Error("Recorded answer not found.");
     return found;
   }
-  profile(): Profile {
-    return z
-      .enum(["curious", "playful"])
-      .parse(
-        this.db.prepare("SELECT value FROM settings WHERE key='profile'").get()
-          ?.value ?? "curious",
-      );
+  async profile(): Promise<Profile> {
+    return profileSchema.parse(
+      (await this.store.getSetting("profile")) ?? "curious",
+    );
   }
-  setProfile(profile: Profile): void {
-    this.db
-      .prepare(
-        "INSERT INTO settings(key,value) VALUES('profile',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-      )
-      .run(profile);
+  async setProfile(profile: Profile): Promise<void> {
+    await this.store.setSetting("profile", profile);
   }
-  create(
+  async create(
+    learnerId: string,
     profile: Profile,
     sample: boolean,
     reviewedOpportunity: boolean,
-  ): Attempt {
+  ): Promise<Attempt> {
+    const learner = await this.learner(learnerId);
+    if (
+      sample &&
+      !(await this.learners()).some((l) => l.id === walkthroughId(learnerId))
+    )
+      await this.store.put("learner", {
+        id: walkthroughId(learnerId),
+        name: `${learner.name.trim().split(/\s+/)[0] || "You"} · walkthrough`,
+        sample: true,
+        completedAt: null,
+      });
     const attempt: Attempt = {
       id: randomUUID(),
-      learnerId: sample ? "sample-you" : "you",
+      learnerId: sample ? walkthroughId(learnerId) : learnerId,
       profile,
       sample,
       reviewedOpportunity,
@@ -242,18 +222,18 @@ export class Attempts {
       reviews: [],
       endingVariant: Math.random() < 0.5 ? 0 : 1,
     };
-    this.save("attempt", attempt);
+    await this.store.put("attempt", attempt);
     return attempt;
   }
-  addAnswer(
+  async addAnswer(
     attemptId: string,
     kind: Answer["kind"],
     provenance: Answer["provenance"],
     originalTranscript: string,
-    audioPath: string | null,
+    audioId: string | null,
     audioMetadata: Answer["audioMetadata"] = null,
-  ): Answer {
-    const attempt = this.get(attemptId);
+  ): Promise<Answer> {
+    const attempt = await this.get(attemptId);
     if (attempt.finishedAt)
       throw new Error("This attempt is finished. Start a new explanation.");
     if (kind === "main" && attempt.mainAssessment)
@@ -279,7 +259,7 @@ export class Attempts {
       kind,
       provenance,
       originalTranscript,
-      audioPath,
+      audioId,
       audioMetadata,
       corrections: [],
       transcription:
@@ -291,13 +271,13 @@ export class Attempts {
       createdAt: new Date().toISOString(),
       submittedAt: null,
     };
-    this.save("answer", answer);
+    await this.store.put("answer", answer);
     if (kind === "main")
-      this.save("attempt", { ...attempt, mainAnswerId: answer.id });
+      await this.store.put("attempt", { ...attempt, mainAnswerId: answer.id });
     return answer;
   }
-  setTranscript(id: string, transcript: string): Answer {
-    const answer = this.answer(id);
+  async setTranscript(id: string, transcript: string): Promise<Answer> {
+    const answer = await this.answer(id);
     if (answer.submittedAt || answer.originalTranscript)
       throw new Error("This transcript is already preserved.");
     const updated = {
@@ -305,21 +285,25 @@ export class Attempts {
       originalTranscript: transcript,
       transcription: "ElevenLabs · scribe_v2 · English",
     };
-    this.save("answer", updated);
+    await this.store.put("answer", updated);
     return updated;
   }
-  correct(id: string, index: number, replacement: string): Answer {
-    const updated = replaceWord(this.answer(id), index, replacement);
-    this.save("answer", updated);
+  async correct(
+    id: string,
+    index: number,
+    replacement: string,
+  ): Promise<Answer> {
+    const updated = replaceWord(await this.answer(id), index, replacement);
+    await this.store.put("answer", updated);
     return updated;
   }
-  recordMain(
+  async recordMain(
     answerId: string,
     assessment: MainAssessment,
     judgedTranscript: string,
-  ): Attempt {
-    const answer = this.answer(answerId),
-      attempt = this.get(answer.attemptId);
+  ): Promise<Attempt> {
+    const answer = await this.answer(answerId),
+      attempt = await this.get(answer.attemptId);
     if (reviewedTranscript(answer) !== judgedTranscript)
       throw new Error(
         "Words changed while assessment was running. Submit the reviewed recording again.",
@@ -330,24 +314,24 @@ export class Attempts {
       );
     if (answer.submittedAt || attempt.mainAssessment)
       throw new Error("This explanation is already submitted.");
-    this.save("answer", { ...answer, submittedAt: assessment.at });
+    await this.store.put("answer", { ...answer, submittedAt: assessment.at });
     const updated = { ...attempt, mainAssessment: assessment };
-    this.save("attempt", updated);
-    this.grant(updated, assessment.outcome);
+    await this.store.put("attempt", updated);
+    await this.grant(updated, assessment.outcome);
     return updated;
   }
-  recordDiagnostic(
+  async recordDiagnostic(
     answerId: string,
     assessment: Attempt["diagnostics"][number]["assessment"],
     judgedTranscript: string,
-  ): Attempt {
-    const answer = this.answer(answerId),
-      attempt = this.get(answer.attemptId);
+  ): Promise<Attempt> {
+    const answer = await this.answer(answerId),
+      attempt = await this.get(answer.attemptId);
     if (reviewedTranscript(answer) !== judgedTranscript)
       throw new Error(
         "Words changed while assessment was running. Submit the reviewed recording again.",
       );
-    const latest = this.answers()
+    const latest = (await this.answers())
       .filter((a) => a.attemptId === attempt.id && a.kind === answer.kind)
       .at(-1);
     if (latest?.id !== answerId || attempt.finishedAt)
@@ -359,7 +343,7 @@ export class Attempts {
       attempt.diagnostics.some((d) => d.questionId === answer.kind)
     )
       throw new Error("Diagnostic already submitted.");
-    this.save("answer", { ...answer, submittedAt: assessment.at });
+    await this.store.put("answer", { ...answer, submittedAt: assessment.at });
     const updated = {
       ...attempt,
       diagnostics: [
@@ -367,21 +351,21 @@ export class Attempts {
         { answerId, questionId: answer.kind, assessment },
       ],
     };
-    this.save("attempt", updated);
+    await this.store.put("attempt", updated);
     return updated;
   }
-  review(
+  async review(
     id: string,
     action: Review["action"],
     note: string,
     criteria: Criterion[],
-  ): Attempt {
-    const attempt = this.get(id);
+  ): Promise<Attempt> {
+    const attempt = await this.get(id);
     if (!attempt.mainAssessment) throw new Error("No assessment to review.");
     if (new Set(criteria.map((c) => c.id)).size !== 3)
       throw new Error("Review each required concept once.");
     const mainAnswer = attempt.mainAnswerId
-      ? this.answer(attempt.mainAnswerId)
+      ? await this.answer(attempt.mainAnswerId)
       : null;
     if (!mainAnswer) throw new Error("Original evidence missing.");
     for (const c of criteria)
@@ -403,38 +387,59 @@ export class Attempts {
           : deriveOutcome(criteria, false),
     };
     const updated = { ...attempt, reviews: [...attempt.reviews, review] };
-    this.save("attempt", updated);
-    this.grant(updated, review.outcome);
+    await this.store.put("attempt", updated);
+    await this.grant(updated, review.outcome);
     return updated;
   }
-  finish(id: string): Attempt {
-    const attempt = this.get(id);
+  async finish(id: string): Promise<Attempt> {
+    const attempt = await this.get(id);
     if (attempt.finishedAt) return attempt;
     if (!attempt.diagnostics.some((d) => d.questionId === "followup-1"))
       throw new Error("Answer the first follow-up before finishing.");
     const updated = { ...attempt, finishedAt: new Date().toISOString() };
-    this.save("attempt", updated);
+    await this.store.put("attempt", updated);
     return updated;
   }
-  teacher(): TeacherData {
-    const learners = this.learners(),
-      attempts = this.attempts();
+  async teacher(): Promise<TeacherData> {
+    const [learners, attempts, answers] = await Promise.all([
+      this.learners(),
+      this.attempts(),
+      this.answers(),
+    ]);
     return {
       learners,
       attempts,
-      answers: this.answers(),
+      answers,
       recap: projectRecap(learners, attempts),
     };
   }
-  private grant(attempt: Attempt, outcome: MainAssessment["outcome"]): void {
-    const learner = this.learners().find((l) => l.id === attempt.learnerId);
+  private async grant(
+    attempt: Attempt,
+    outcome: MainAssessment["outcome"],
+  ): Promise<void> {
+    const learner = (await this.store.list("learner")).find(
+      (l) => l.id === attempt.learnerId,
+    );
     if (learner && !learner.completedAt && outcome === "pass")
-      this.save("learner", {
+      await this.store.put("learner", {
         ...learner,
         completedAt: new Date().toISOString(),
       });
   }
-  private seedSamples(): void {
+  private async seedSamples(): Promise<void> {
+    if (await this.store.getSetting("samples")) return;
+    for (const [id, name] of [
+      ["sample-maya", "Maya"],
+      ["sample-noah", "Noah"],
+      ["sample-eli", "Eli"],
+      ["sample-june", "June"],
+    ] as const)
+      await this.store.put("learner", {
+        id,
+        name,
+        sample: true,
+        completedAt: null,
+      });
     const cases = [
       {
         id: "sample-maya",
@@ -462,7 +467,7 @@ export class Attempts {
         retry: true,
       },
     ];
-    cases.forEach((item, index) => {
+    for (const [index, item] of cases.entries()) {
       const createdAt = new Date(
         Date.now() - (cases.length - index) * 3600000,
       ).toISOString();
@@ -474,7 +479,7 @@ export class Attempts {
           "Authored sample class evidence. No real learner or AI assessment.",
       }));
       const attempt: Attempt = {
-        id: randomUUID(),
+        id: `00000000-0000-4000-8000-00000000000${index + 1}`,
         learnerId: item.id,
         profile: "curious",
         sample: true,
@@ -496,11 +501,9 @@ export class Attempts {
         reviews: [],
         endingVariant: 0,
       };
-      this.save("attempt", attempt);
-      this.grant(
-        attempt,
-        attempt.mainAssessment?.outcome ?? "not-enough-evidence",
-      );
-    });
+      await this.store.put("attempt", attempt);
+      await this.grant(attempt, deriveOutcome(criteria, false));
+    }
+    await this.store.setSetting("samples", "seeded");
   }
 }

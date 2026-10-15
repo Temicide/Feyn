@@ -253,7 +253,7 @@ export function Recorder({
             REVIEW YOUR WORDS{" "}
             <span>{3 - state.answer.corrections.length} corrections left</span>
           </div>
-          {state.answer.audioPath && (
+          {state.answer.audioId && (
             <audio controls src={`/api/answers/${state.answer.id}/audio`} />
           )}
           {state.answer.provenance === "scripted-sample" && (

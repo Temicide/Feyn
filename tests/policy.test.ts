@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Attempts, projectRecap, replaceWord } from "../server/attempts.js";
+import {
+  Attempts,
+  projectRecap,
+  replaceWord,
+  walkthroughId,
+} from "../server/attempts.js";
+import { MemoryStore } from "../server/store.js";
 import {
   deriveOutcome,
   validateMain,
@@ -66,13 +72,19 @@ function diagnostic(
     at,
   };
 }
-function submitMain(
+const you = "google:you";
+async function fresh(): Promise<Attempts> {
+  const store = new Attempts(new MemoryStore());
+  await store.signIn(you, "You");
+  return store;
+}
+async function submitMain(
   store: Attempts,
   state: Criterion["state"] = "demonstrated",
   reviewed = false,
 ) {
-  const attempt = store.create("curious", false, reviewed);
-  const answer = store.addAnswer(
+  const attempt = await store.create(you, "curious", false, reviewed);
+  const answer = await store.addAnswer(
     attempt.id,
     "main",
     "microphone",
@@ -81,64 +93,69 @@ function submitMain(
     { filename: "original.wav", mime: "audio/wav" },
   );
   return {
-    attempt: store.recordMain(answer.id, main(state), transcript),
+    attempt: await store.recordMain(answer.id, main(state), transcript),
     answer,
   };
 }
 
-test("main pass plus wrong required follow-up earns completion without changing main result", () => {
-  const store = new Attempts(":memory:");
-  const { attempt } = submitMain(store);
-  const answer = store.addAnswer(
+test("main pass plus wrong required follow-up earns completion without changing main result", async () => {
+  const store = await fresh();
+  const { attempt } = await submitMain(store);
+  const answer = await store.addAnswer(
     attempt.id,
     "followup-1",
     "microphone",
     "Yes, seven.",
     "data/audio/followup.wav",
   );
-  const result = store.recordDiagnostic(
+  const result = await store.recordDiagnostic(
     answer.id,
     diagnostic("incorrect"),
     "Yes, seven.",
   );
   assert.equal(result.mainAssessment?.outcome, "pass");
   assert.equal(result.diagnostics[0]?.assessment.outcome, "incorrect");
-  assert.ok(store.learner().completedAt);
-  assert.equal(store.finish(attempt.id).diagnostics.length, 1);
-  const row = store
-    .teacher()
-    .recap.find((c) => c.id === "average-instantaneous");
-  assert.ok(row?.gaps.includes("you"));
-  assert.ok(!row?.support.includes("you"));
+  assert.ok((await store.learner(you)).completedAt);
+  assert.equal((await store.finish(attempt.id)).diagnostics.length, 1);
+  const row = (await store.teacher()).recap.find(
+    (c) => c.id === "average-instantaneous",
+  );
+  assert.ok(row?.gaps.includes(you));
+  assert.ok(!row?.support.includes(you));
 });
-test("weaker voluntary retry updates evidence and never revokes completion", () => {
-  const store = new Attempts(":memory:");
-  submitMain(store);
-  const earned = store.learner().completedAt;
-  submitMain(store, "missing", true);
-  assert.equal(store.learner().completedAt, earned);
-  assert.equal(store.attempts().filter((a) => a.learnerId === "you").length, 2);
-  assert.ok(store.teacher().recap.every((c) => c.gaps.includes("you")));
+test("weaker voluntary retry updates evidence and never revokes completion", async () => {
+  const store = await fresh();
+  await submitMain(store);
+  const earned = (await store.learner(you)).completedAt;
+  await submitMain(store, "missing", true);
+  assert.equal((await store.learner(you)).completedAt, earned);
+  assert.equal(
+    (await store.attempts()).filter((a) => a.learnerId === you).length,
+    2,
+  );
+  assert.ok((await store.teacher()).recap.every((c) => c.gaps.includes(you)));
 });
-test("prepared walkthrough cannot complete the real learner or become their class evidence", () => {
-  const store = new Attempts(":memory:");
-  const attempt = store.create("curious", true, false);
-  const answer = store.addAnswer(
+test("prepared walkthrough cannot complete the real learner or become their class evidence", async () => {
+  const store = await fresh();
+  const attempt = await store.create(you, "curious", true, false);
+  const answer = await store.addAnswer(
     attempt.id,
     "main",
     "scripted-sample",
     transcript,
     null,
   );
-  store.recordMain(answer.id, main(), transcript);
-  assert.equal(store.learner().completedAt, null);
-  assert.equal(store.get(attempt.id).learnerId, "sample-you");
-  assert.ok(store.teacher().recap.every((c) => c.unassessed.includes("you")));
+  await store.recordMain(answer.id, main(), transcript);
+  assert.equal((await store.learner(you)).completedAt, null);
+  assert.equal((await store.get(attempt.id)).learnerId, walkthroughId(you));
+  assert.ok(
+    (await store.teacher()).recap.every((c) => c.unassessed.includes(you)),
+  );
 });
-test("three ordered word replacements preserve originals, including repeated word position", () => {
-  const store = new Attempts(":memory:");
-  const attempt = store.create("curious", false, false);
-  let answer = store.addAnswer(
+test("three ordered word replacements preserve originals, including repeated word position", async () => {
+  const store = await fresh();
+  const attempt = await store.create(you, "curious", false, false);
+  let answer = await store.addAnswer(
     attempt.id,
     "main",
     "uploaded-recording",
@@ -146,9 +163,9 @@ test("three ordered word replacements preserve originals, including repeated wor
     "data/audio/fixed.wav",
     { filename: "spoken.wav", mime: "audio/wav" },
   );
-  answer = store.correct(answer.id, 1, "three");
-  answer = store.correct(answer.id, 5, "six.");
-  answer = store.correct(answer.id, 1, "3");
+  answer = await store.correct(answer.id, 1, "three");
+  answer = await store.correct(answer.id, 5, "six.");
+  answer = await store.correct(answer.id, 1, "3");
   assert.equal(reviewedTranscript(answer), "At 3 seconds speed is six.");
   assert.equal(answer.originalTranscript, "At tree seconds speed is sex.");
   assert.equal(answer.audioMetadata?.mime, "audio/wav");
@@ -160,13 +177,13 @@ test("three ordered word replacements preserve originals, including repeated wor
       [1, "three", "3"],
     ],
   );
-  assert.throws(() => store.correct(answer.id, 0, "Now"), /three word/);
+  await assert.rejects(() => store.correct(answer.id, 0, "Now"), /three word/);
   assert.throws(
     () => replaceWord({ ...answer, corrections: [] }, 0, "Two words"),
     /one word/,
   );
 });
-test("provider result requires each criterion once, literal quotes, and derived pass", () => {
+test("provider result requires each criterion once, literal quotes, and derived pass", async () => {
   const assessment = main();
   assert.equal(validateMain(assessment, transcript).criteria.length, 3);
   assert.throws(
@@ -205,53 +222,53 @@ test("provider result requires each criterion once, literal quotes, and derived 
   );
   assert.equal(deriveOutcome(main().criteria, true), "needs-work");
 });
-test("late assessment cannot attach to changed words or a replaced recording", () => {
-  const store = new Attempts(":memory:");
-  const a = store.create("curious", false, false);
-  const first = store.addAnswer(
+test("late assessment cannot attach to changed words or a replaced recording", async () => {
+  const store = await fresh();
+  const a = await store.create(you, "curious", false, false);
+  const first = await store.addAnswer(
     a.id,
     "main",
     "microphone",
     transcript,
     "one.wav",
   );
-  store.correct(first.id, 0, "Position");
-  assert.throws(
+  await store.correct(first.id, 0, "Position");
+  await assert.rejects(
     () => store.recordMain(first.id, main(), transcript),
     /Words changed/,
   );
-  const second = store.addAnswer(
+  const second = await store.addAnswer(
     a.id,
     "main",
     "microphone",
     transcript,
     "two.wav",
   );
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       store.recordMain(
         first.id,
         main(),
-        reviewedTranscript(store.answer(first.id)),
+        reviewedTranscript(await store.answer(first.id)),
       ),
     /replaced/,
   );
-  store.recordMain(second.id, main(), transcript);
-  const followup = store.addAnswer(
+  await store.recordMain(second.id, main(), transcript);
+  const followup = await store.addAnswer(
     a.id,
     "followup-1",
     "microphone",
     "Yes, seven.",
     "one.wav",
   );
-  store.addAnswer(
+  await store.addAnswer(
     a.id,
     "followup-1",
     "microphone",
     "A newer answer.",
     "two.wav",
   );
-  assert.throws(
+  await assert.rejects(
     () =>
       store.recordDiagnostic(
         followup.id,
@@ -261,57 +278,63 @@ test("late assessment cannot attach to changed words or a replaced recording", (
     /replaced/,
   );
 });
-test("class recap uses one latest usable concept observation, including diagnostics and later teacher reviews", () => {
-  const store = new Attempts(":memory:");
-  const { attempt } = submitMain(store, "missing");
-  const answer = store.addAnswer(
+test("class recap uses one latest usable concept observation, including diagnostics and later teacher reviews", async () => {
+  const store = await fresh();
+  const { attempt } = await submitMain(store, "missing");
+  const answer = await store.addAnswer(
     attempt.id,
     "followup-1",
     "microphone",
     "No, seven is the average over the whole interval.",
     "next.wav",
   );
-  store.recordDiagnostic(
+  await store.recordDiagnostic(
     answer.id,
     diagnostic("correct"),
     "No, seven is the average over the whole interval.",
   );
-  let row = store.teacher().recap.find((c) => c.id === "average-instantaneous");
-  assert.deepEqual(
-    row?.resolved.filter((id) => id === "you"),
-    ["you"],
+  let row = (await store.teacher()).recap.find(
+    (c) => c.id === "average-instantaneous",
   );
-  assert.ok(!row?.gaps.includes("you"));
-  const later = store.create("curious", false, true),
-    laterAnswer = store.addAnswer(
+  assert.deepEqual(
+    row?.resolved.filter((id) => id === you),
+    [you],
+  );
+  assert.ok(!row?.gaps.includes(you));
+  const later = await store.create(you, "curious", false, true),
+    laterAnswer = await store.addAnswer(
       later.id,
       "main",
       "microphone",
       transcript,
       "later.wav",
     );
-  store.recordMain(
+  await store.recordMain(
     laterAnswer.id,
     main("not-assessable", "2026-10-15T13:00:00.000Z"),
     transcript,
   );
-  row = store.teacher().recap.find((c) => c.id === "average-instantaneous");
-  assert.ok(row?.demonstrated.includes("you"));
-  const reviewed = store.review(
+  row = (await store.teacher()).recap.find(
+    (c) => c.id === "average-instantaneous",
+  );
+  assert.ok(row?.demonstrated.includes(you));
+  const reviewed = await store.review(
     attempt.id,
     "correct",
     "I listened to the evidence and confirmed the missing distinction.",
     main("missing").criteria,
   );
-  row = store.teacher().recap.find((c) => c.id === "average-instantaneous");
+  row = (await store.teacher()).recap.find(
+    (c) => c.id === "average-instantaneous",
+  );
   assert.equal(reviewed.reviews.length, 1);
-  assert.ok(row?.gaps.includes("you"));
+  assert.ok(row?.gaps.includes(you));
 });
-test("automatic support flags stay deferred even after repeated main gaps and diagnostic mistakes", () => {
-  const store = new Attempts(":memory:");
-  const first = submitMain(store, "missing");
-  const second = submitMain(store, "missing", true);
-  const attempts = store.attempts().map((a) =>
+test("automatic support flags stay deferred even after repeated main gaps and diagnostic mistakes", async () => {
+  const store = await fresh();
+  const first = await submitMain(store, "missing");
+  const second = await submitMain(store, "missing", true);
+  const attempts = (await store.attempts()).map((a) =>
     a.id === second.attempt.id
       ? {
           ...a,
@@ -320,8 +343,8 @@ test("automatic support flags stay deferred even after repeated main gaps and di
       : a,
   );
   assert.ok(
-    projectRecap(store.learners(), attempts).every(
-      (c) => !c.support.includes("you"),
+    projectRecap(await store.learners(), attempts).every(
+      (c) => !c.support.includes(you),
     ),
   );
   const resolved: Attempt = {
@@ -329,17 +352,17 @@ test("automatic support flags stay deferred even after repeated main gaps and di
     mainAssessment: main("demonstrated", "2026-10-15T14:00:00.000Z"),
   };
   assert.ok(
-    projectRecap(store.learners(), [first.attempt, resolved]).every(
-      (c) => !c.support.includes("you"),
+    projectRecap(await store.learners(), [first.attempt, resolved]).every(
+      (c) => !c.support.includes(you),
     ),
   );
 });
-test("submitted evidence freezes, followups remain bounded, and finishing requires the first followup", () => {
-  const store = new Attempts(":memory:");
-  const { attempt, answer } = submitMain(store);
-  assert.throws(() => store.correct(answer.id, 0, "Wrong"), /Submitted/);
-  assert.throws(() => store.finish(attempt.id), /first follow-up/);
-  assert.throws(
+test("submitted evidence freezes, followups remain bounded, and finishing requires the first followup", async () => {
+  const store = await fresh();
+  const { attempt, answer } = await submitMain(store);
+  await assert.rejects(() => store.correct(answer.id, 0, "Wrong"), /Submitted/);
+  await assert.rejects(() => store.finish(attempt.id), /first follow-up/);
+  await assert.rejects(
     () =>
       store.addAnswer(
         attempt.id,
@@ -350,24 +373,31 @@ test("submitted evidence freezes, followups remain bounded, and finishing requir
       ),
     /first diagnostic/,
   );
-  const first = store.addAnswer(
+  const first = await store.addAnswer(
     attempt.id,
     "followup-1",
     "microphone",
     "Yes, seven.",
     "one.wav",
   );
-  store.recordDiagnostic(first.id, diagnostic("incorrect"), "Yes, seven.");
-  assert.throws(
+  await store.recordDiagnostic(
+    first.id,
+    diagnostic("incorrect"),
+    "Yes, seven.",
+  );
+  await assert.rejects(
     () =>
       store.addAnswer(attempt.id, "followup-1", "microphone", "No.", "two.wav"),
     /already submitted/,
   );
-  const finished = store.finish(attempt.id);
-  assert.equal(store.finish(attempt.id).finishedAt, finished.finishedAt);
+  const finished = await store.finish(attempt.id);
+  assert.equal(
+    (await store.finish(attempt.id)).finishedAt,
+    finished.finishedAt,
+  );
 });
 
-test("diagnostic observations reject duplicate conflicting or missing concepts before recap", () => {
+test("diagnostic observations reject duplicate conflicting or missing concepts before recap", async () => {
   const transcript =
     "Seven is the average. At three seconds the instantaneous speed is six.";
   const first = {

@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { request } from "node:http";
 import { z } from "zod";
 import { createApp } from "../server/main.js";
-import { Attempts } from "../server/attempts.js";
+import { MemoryStore } from "../server/store.js";
 import { bootstrapSchema } from "../shared/contracts.js";
 
 function localRequest(
@@ -39,7 +39,7 @@ function localRequest(
   });
 }
 test("HTTP boundary rejects rebinding hosts and foreign origins while local app and MCP requests work", async () => {
-  const server = createApp(new Attempts(":memory:")).listen(0, "127.0.0.1");
+  const server = createApp(new MemoryStore()).listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string")

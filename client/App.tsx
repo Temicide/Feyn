@@ -183,6 +183,7 @@ export function App() {
           <Teacher
             selectedAttemptId={teacherAttemptId}
             lesson={bootstrap.lesson}
+            learnerId={bootstrap.learner.id}
             profile={bootstrap.profile}
             onProfile={changeProfile}
           />
