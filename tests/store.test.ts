@@ -84,9 +84,10 @@ async function lessonFlow(records: () => RecordStore) {
   );
   const ada = teacher.learners.find((l) => l.id === learner.id);
   assert.equal(ada?.name, "Ada L.");
-  assert.ok(
-    await reopened.store.completion(learner.id, assignment.id),
-    "completion survives a renamed sign-in",
+  assert.equal(
+    (await reopened.store.workStatus(learner.id, assignment.id)).kind,
+    "waiting",
+    "work status survives a renamed sign-in",
   );
   assert.equal(
     teacher.attempts.filter((a) => a.learnerId === "sample-eli").length,

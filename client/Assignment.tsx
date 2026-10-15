@@ -7,6 +7,7 @@ import {
   type Bootstrap,
   type Me,
 } from "../shared/contracts.js";
+import { isComplete } from "../shared/work-status.js";
 import { api, json } from "./api.js";
 import { Recorder } from "./Recorder.js";
 import { go, href } from "./route.js";
@@ -138,7 +139,7 @@ export function AssignmentPage({
       <Loading text="Opening the assignment" />
     );
   const { assignment } = bootstrap,
-    completed = Boolean(bootstrap.completedAt),
+    completed = isComplete(bootstrap.status),
     due = dueLabel(assignment.dueDate),
     passed = (attempt: Attempt) => attempt.mainAssessment?.outcome === "pass";
   return (

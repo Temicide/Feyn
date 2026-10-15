@@ -5,6 +5,7 @@ import {
   studentCoursesSchema,
   type StudentCourse,
 } from "../shared/contracts.js";
+import { isComplete } from "../shared/work-status.js";
 import { api, json } from "./api.js";
 import { go, href } from "./route.js";
 import {
@@ -21,7 +22,7 @@ type Card = StudentCourse["assignments"][number];
 
 function nextUp(course: StudentCourse): Card | undefined {
   return course.assignments
-    .filter((a) => !a.completedAt)
+    .filter((a) => !isComplete(a.status))
     .toSorted((a, b) =>
       (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"),
     )[0];
@@ -202,7 +203,7 @@ export function CoursePage({
       </div>
     );
   const upcoming = course.assignments
-    .filter((a) => !a.completedAt)
+    .filter((a) => !isComplete(a.status))
     .toSorted((a, b) =>
       (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"),
     );
@@ -259,7 +260,7 @@ export function CoursePage({
                     question or two
                   </span>
                 </span>
-                <StatusChip completed={Boolean(a.completedAt)} />
+                <StatusChip completed={isComplete(a.status)} />
               </a>
             );
           })}

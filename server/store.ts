@@ -3,7 +3,6 @@ import {
   answerSchema,
   assignmentSchema,
   attemptSchema,
-  completionSchema,
   courseSchema,
   enrollmentSchema,
   learnerSchema,
@@ -11,7 +10,6 @@ import {
   type Answer,
   type Assignment,
   type Attempt,
-  type Completion,
   type Course,
   type Enrollment,
   type Learner,
@@ -26,7 +24,6 @@ export type Records = {
   enrollment: Enrollment;
   assignment: Assignment;
   teacher: TeacherEmail;
-  completion: Completion;
 };
 export type Kind = keyof Records;
 export type Audio = { bytes: Buffer; mime: string };
@@ -48,7 +45,6 @@ export class MemoryStore implements RecordStore {
     enrollment: new Map(),
     assignment: new Map(),
     teacher: new Map(),
-    completion: new Map(),
   };
   private settings = new Map<string, string>();
   private audio = new Map<string, Audio>();
@@ -80,7 +76,6 @@ const schemas = {
   enrollment: enrollmentSchema,
   assignment: assignmentSchema,
   teacher: teacherEmailSchema,
-  completion: completionSchema,
 };
 const clients = new Map<string, Promise<MongoClient>>();
 function connect(uri: string): Promise<MongoClient> {

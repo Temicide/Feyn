@@ -578,7 +578,7 @@ test("a student joins with a code, leaves, and gets their history back on rejoin
   assert.equal((await enroll(cookie, " feyn01 ")).status, 200);
   const [course] = await courses();
   assert.equal(course?.title, "Calculus 1 · Rates of change");
-  assert.deepEqual(course?.assignments.map((a) => [a.id, a.completedAt]), [["cart-speed", null]]);
+  assert.deepEqual(course?.assignments.map((a) => [a.id, a.status]), [["cart-speed", { kind: "none" }]]);
 
   const attempt = attemptSchema.parse(
     (await call("/api/attempts", json(cookie, "POST", { ...attemptBody, sample: true }))).body,
