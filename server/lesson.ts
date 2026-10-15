@@ -1,4 +1,4 @@
-import type { Lesson } from "../shared/contracts.ts";
+import type { Lesson } from "../shared/contracts.js";
 export const lesson = {
   id: "cart-speed",
   title: "A moment in motion",

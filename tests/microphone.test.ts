@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MicrophoneAccess } from "../client/microphone.ts";
+import { MicrophoneAccess } from "../client/microphone.js";
 
 function recordingStream() {
   let stopped = 0;

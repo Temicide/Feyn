@@ -5,7 +5,7 @@ process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9";
 process.env.ANTHROPIC_API_KEY = "test-key";
 process.env.ANTHROPIC_MODEL = "test-model";
 process.env.ELEVENLABS_API_KEY = "test-key";
-const { assessMain, transcribe } = await import("../server/providers.ts");
+const { assessMain, transcribe } = await import("../server/providers.js");
 
 test("unreachable providers report a named operational error instead of a bare network failure", async (t) => {
   t.mock.method(globalThis, "fetch", async () => {

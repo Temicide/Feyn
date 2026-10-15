@@ -9,11 +9,11 @@ import {
   type Attempt,
   type Bootstrap,
   type Profile,
-} from "../shared/contracts.ts";
-import { api, json } from "./api.ts";
-import { Recorder } from "./Recorder.tsx";
-import { Scene } from "./Scene.tsx";
-import { Teacher } from "./Teacher.tsx";
+} from "../shared/contracts.js";
+import { api, json } from "./api.js";
+import { Recorder } from "./Recorder.js";
+import { Scene } from "./Scene.js";
+import { Teacher } from "./Teacher.js";
 
 type StudentStage =
   | { kind: "assignment" }

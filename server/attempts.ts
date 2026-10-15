@@ -16,9 +16,9 @@ import {
   type Profile,
   type Review,
   type TeacherData,
-} from "../shared/contracts.ts";
-import { deriveOutcome } from "./providers.ts";
-import { lesson } from "./lesson.ts";
+} from "../shared/contracts.js";
+import { deriveOutcome } from "./providers.js";
+import { lesson } from "./lesson.js";
 
 export function replaceWord(
   answer: Answer,

@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { request } from "node:http";
 import { z } from "zod";
-import { createApp } from "../server/main.ts";
-import { Attempts } from "../server/attempts.ts";
-import { bootstrapSchema } from "../shared/contracts.ts";
+import { createApp } from "../server/main.js";
+import { Attempts } from "../server/attempts.js";
+import { bootstrapSchema } from "../shared/contracts.js";
 
 function localRequest(
   url: string,

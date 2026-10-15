@@ -4,14 +4,14 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
-import { Attempts } from "./attempts.ts";
-import { lesson } from "./lesson.ts";
+import { Attempts } from "./attempts.js";
+import { lesson } from "./lesson.js";
 import {
   assessMain,
   assessDiagnostic,
   providerStatus,
   transcribe,
-} from "./providers.ts";
+} from "./providers.js";
 import {
   createAttemptSchema,
   profileSchema,
@@ -21,7 +21,7 @@ import {
   reviewedTranscript,
   sampleMain,
   sampleFollowups,
-} from "../shared/contracts.ts";
+} from "../shared/contracts.js";
 
 const port = Number(process.env.PORT ?? 4173);
 const hosts = [port, 5173].flatMap((p) =>

@@ -9,8 +9,8 @@ import {
   type Lesson,
   type Profile,
   type TeacherData,
-} from "../shared/contracts.ts";
-import { api, json } from "./api.ts";
+} from "../shared/contracts.js";
+import { api, json } from "./api.js";
 
 const labels = {
   pass: "Meets the main criteria",

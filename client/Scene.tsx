@@ -4,8 +4,8 @@ import {
   type Answer,
   type Attempt,
   type Lesson,
-} from "../shared/contracts.ts";
-import { Recorder } from "./Recorder.tsx";
+} from "../shared/contracts.js";
+import { Recorder } from "./Recorder.js";
 
 type Line = {
   speaker: "You" | "Pip";

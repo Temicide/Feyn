@@ -6,9 +6,9 @@ import {
   words,
   type Answer,
   type Attempt,
-} from "../shared/contracts.ts";
-import { api, json } from "./api.ts";
-import { MicrophoneAccess } from "./microphone.ts";
+} from "../shared/contracts.js";
+import { api, json } from "./api.js";
+import { MicrophoneAccess } from "./microphone.js";
 
 type RecordingState =
   | { kind: "idle" }

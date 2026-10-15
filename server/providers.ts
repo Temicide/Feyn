@@ -3,8 +3,8 @@ import {
   criterionSchema,
   type MainAssessment,
   type DiagnosticAssessment,
-} from "../shared/contracts.ts";
-import { lesson } from "./lesson.ts";
+} from "../shared/contracts.js";
+import { lesson } from "./lesson.js";
 
 const environment = z
   .object({

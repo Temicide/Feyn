@@ -1,19 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Attempts, projectRecap, replaceWord } from "../server/attempts.ts";
+import { Attempts, projectRecap, replaceWord } from "../server/attempts.js";
 import {
   deriveOutcome,
   validateMain,
   validateDiagnostic,
-} from "../server/providers.ts";
-import { lesson } from "../server/lesson.ts";
+} from "../server/providers.js";
+import { lesson } from "../server/lesson.js";
 import {
   reviewedTranscript,
   type MainAssessment,
   type DiagnosticAssessment,
   type Criterion,
   type Attempt,
-} from "../shared/contracts.ts";
+} from "../shared/contracts.js";
 
 const transcript =
   "Distance is position. Speed is the rate of change. Average is over an interval, instantaneous at one moment. At three seconds the instantaneous speed is six meters per second.";
