@@ -6,17 +6,19 @@ The student records an English explanation, reviews its words, and submits. The 
 
 ## Shape
 
-Use React and TypeScript with Vite for the browser and a small TypeScript Node server. The server owns durable evidence and policy. Use Node 26 SQLite for records and stable files for audio under ignored data/. The browser owns microphone lifetime, dialogue playback, and presentation only.
+Use React and TypeScript with Vite for the browser and a small TypeScript Node server, deployed as one Vercel function. The server owns durable evidence and policy. MongoDB holds records, settings, and original audio in GridFS. The browser owns microphone lifetime, dialogue playback, and presentation only.
 
 One canonical assignment contains the question, reference, essential concept IDs, and follow-up definitions. Main and diagnostic assessments use separate types and write paths. Derive completion from an earned grant and never revoke it during optional retries. Derive current concept status independently from the latest usable evidence and teacher review. Unknown or failed providers never become a conceptual-failure assessment.
 
-Keep modules shallow in number and deep in capability. shared/contracts.ts owns validated domain/request schemas. server/lesson.ts owns assignment knowledge. server/attempts.ts owns durable records, transcript correction policy, completion, teacher revisions, and class projections. server/providers.ts owns remote protocols and external response parsing. server/main.ts owns HTTP and MCP transport. client modules render views and handle audio; they cannot import server code.
+Keep modules shallow in number and deep in capability. shared/contracts.ts owns validated domain/request schemas. server/lesson.ts owns assignment knowledge. server/attempts.ts owns transcript correction policy, completion, teacher revisions, and class projections over records. server/store.ts owns the one RecordStore seam with an in-memory and a MongoDB implementation. server/auth.ts owns sessions, Google sign-in, and roles. server/providers.ts owns remote protocols and external response parsing. server/main.ts owns HTTP and MCP transport and attempt ownership. api/index.ts adapts the app to Vercel and reports missing configuration. client modules render views and handle audio; they cannot import server code.
 
 Corrections are ordered operations over stable word positions. Each accepted replacement consumes one of three operations, including another replacement at the same position. Preserve the original transcript/audio and every before/after correction. Derive the reviewed transcript. Never permit whole-paragraph insertion via the correction route.
 
 Require every main criterion exactly once in provider results. Evidence quotes must actually occur in the submitted transcript. Compute the accepted main result from criterion states rather than trusting an unconstrained pass flag. Do not let a diagnostic route update the main result. Keep ambiguous transcript evidence distinct from clear mistakes.
 
-Bind asynchronous work to answer/attempt identity so late results cannot attach to a replacement recording. Keep SQLite persistence behind the attempts module. Avoid a generic repository, plugin registry, or event bus.
+Bind asynchronous work to answer/attempt identity so late results cannot attach to a replacement recording. Keep persistence behind RecordStore: list by kind in insertion order, upsert by id, settings, and audio. Avoid a generic repository, plugin registry, or event bus.
+
+Identify each learner by the signed-in account (google:<sub>). Each learner's sample walkthrough belongs to a separate labeled learner, walkthrough:<learner id>, so it can never grant that learner's completion. Seed the authored classmates once per database. A student reaches only their own attempts; the teacher role, from TEACHER_EMAILS, reads all evidence and owns reviews and Pip's profile.
 
 ## Synthesis decision
 
@@ -24,9 +26,9 @@ The two independent candidates compared browser-owned IndexedDB sessions and ser
 
 ## Provider status
 
-A real request to the configured loopback Anthropic-compatible endpoint returned HTTP 200 and READY. Name that provider Local AI gateway and retain its model identity in evidence. This is not a completed U-Bot connection. ElevenLabs Scribe v2 transcription has been verified with synthetic audio. Credentials remain in ignored server configuration. U-Bot has no MCP client or connector setting; its client calls only chat, code, transcription, media, and history endpoints. The extension/ bridge relays U-Bot's JSON tool calls to /mcp from a Chrome background worker. Provider errors remain operational errors rather than conceptual failures.
+A real request to the configured loopback Anthropic-compatible endpoint returned HTTP 200 and READY. Name a loopback endpoint Local AI gateway and any other endpoint Anthropic-compatible API, and retain its model identity in evidence. This is not a completed U-Bot connection. ElevenLabs Scribe v2 transcription has been verified with synthetic audio. Credentials remain in ignored server configuration. U-Bot has no MCP client or connector setting; its client calls only chat, code, transcription, media, and history endpoints. The Chrome extension bridge is retired; the U-Bot connection moves to the server. Provider errors remain operational errors rather than conceptual failures.
 
-Expose a standards-based MCP endpoint over the same application owner if feasible. A server endpoint is not evidence of a connected U-Bot host. Keep the local prototype bound to loopback. No external deployment in this task.
+Expose a standards-based MCP endpoint over the same application owner, only to clients holding MCP_TOKEN. A server endpoint is not evidence of a connected U-Bot host.
 
 ## Verification
 

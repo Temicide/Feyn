@@ -415,7 +415,7 @@ function Classroom({
                       }
                     />{" "}
                     {bootstrap.providers.assessment
-                      ? "Local AI gateway"
+                      ? bootstrap.providers.assessor
                       : "Sample mode available"}
                   </div>
                 </section>

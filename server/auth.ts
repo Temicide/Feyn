@@ -40,10 +40,12 @@ export type AuthConfig = {
   devLogin: boolean;
 };
 export function authConfig(env: NodeJS.ProcessEnv): AuthConfig {
-  if (!env.SESSION_SECRET && env.VERCEL)
-    throw new Error(
-      "SESSION_SECRET is not configured on the server. Set it in the Vercel project environment.",
-    );
+  if (env.VERCEL)
+    for (const key of ["SESSION_SECRET", "APP_ORIGIN"])
+      if (!env[key])
+        throw new Error(
+          `${key} is not configured on the server. Set it in the Vercel project environment.`,
+        );
   const origin = env.APP_ORIGIN ? new URL(env.APP_ORIGIN) : null;
   return {
     secret: env.SESSION_SECRET || randomBytes(32).toString("hex"),

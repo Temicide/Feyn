@@ -21,6 +21,7 @@ const env = {
   GOOGLE_CLIENT_SECRET: "feyn-client-secret",
   TEACHER_EMAILS: " Teacher@School.test , other@school.test",
   DEV_LOGIN: "1",
+  MCP_TOKEN: "mcp-test-token",
 };
 const local = "127.0.0.1:4173";
 const server = createApp(new MemoryStore(), env).listen(0, "127.0.0.1");
@@ -39,10 +40,11 @@ function call(
     headers?: Record<string, string>;
     body?: Buffer | string;
   } = {},
+  target = base,
 ): Promise<Reply> {
   return new Promise((resolve, reject) => {
     const req = request(
-      `${base}${path}`,
+      `${target}${path}`,
       {
         method: options.method ?? "GET",
         headers: { host: local, ...options.headers },
@@ -392,11 +394,47 @@ test("Google callback verifies the ID token, creates a learner, and starts a ses
   }
 });
 
-test("read-only MCP tools stay available to a local client", async () => {
+test("MCP tools answer only to the configured bearer token", async () => {
+  const listing = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/list",
+  });
+  const bearer = {
+    "content-type": "application/json",
+    authorization: "Bearer mcp-test-token",
+  };
+  for (const authorization of [undefined, "Bearer wrong-token"])
+    assert.equal(
+      (
+        await call("/mcp", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(authorization ? { authorization } : {}),
+          },
+          body: listing,
+        })
+      ).status,
+      401,
+    );
+  assert.equal(
+    (
+      await call("/mcp", {
+        method: "POST",
+        headers: {
+          ...bearer,
+          origin: "chrome-extension://feynbridgeextensionid",
+        },
+        body: listing,
+      })
+    ).status,
+    403,
+  );
   const mcp = await call("/mcp", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    headers: bearer,
+    body: listing,
   });
   assert.equal(mcp.status, 200);
   assert.deepEqual(
@@ -415,7 +453,7 @@ test("read-only MCP tools stay available to a local client", async () => {
   );
   const recap = await call("/mcp", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: bearer,
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: 2,
@@ -436,4 +474,74 @@ test("read-only MCP tools stay available to a local client", async () => {
   );
   for (const name of ["Maya", "Noah", "Eli", "June"])
     assert.equal(text.includes(name), false, `recap omits ${name}`);
+});
+
+test("without MCP_TOKEN the MCP endpoint does not exist", async () => {
+  const { MCP_TOKEN: _, ...withoutToken } = env;
+  const closed = createApp(new MemoryStore(), withoutToken).listen(
+    0,
+    "127.0.0.1",
+  );
+  await once(closed, "listening");
+  try {
+    const port = (closed.address() as { port: number }).port;
+    const response = await call(
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer anything",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      },
+      `http://127.0.0.1:${port}`,
+    );
+    assert.equal(response.status, 404);
+  } finally {
+    closed.close();
+  }
+});
+
+test("recordings over 4 MB are refused with a named limit", async () => {
+  const cookie = await signIn("long@school.test", "Long Talker");
+  const attempt = attemptSchema.parse(
+    (
+      await call(
+        "/api/attempts",
+        json(cookie, "POST", {
+          profile: "curious",
+          sample: false,
+          reviewedOpportunity: false,
+        }),
+      )
+    ).body,
+  );
+  const form = new FormData();
+  form.set(
+    "audio",
+    new File([Buffer.alloc(4 * 1024 * 1024 + 1)], "long.webm", {
+      type: "audio/webm",
+    }),
+  );
+  form.set("kind", "main");
+  form.set("provenance", "microphone");
+  const multipart = new Request("http://upload.invalid", {
+    method: "POST",
+    body: form,
+  });
+  const response = await call(`/api/attempts/${attempt.id}/audio`, {
+    method: "POST",
+    headers: {
+      cookie,
+      origin: `http://${local}`,
+      "content-type": multipart.headers.get("content-type") ?? "",
+    },
+    body: Buffer.from(await multipart.arrayBuffer()),
+  });
+  assert.equal(response.status, 413);
+  assert.match(
+    z.object({ error: z.string() }).parse(response.body).error,
+    /limited to 4 MB/,
+  );
 });

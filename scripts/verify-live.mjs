@@ -9,7 +9,7 @@ const signIn = await fetch(`${base}/api/auth/dev?${new URLSearchParams({ email, 
 const cookie = signIn.headers.getSetCookie().find(c => c.startsWith('feyn_session='))?.split(';')[0];
 assert.ok(cookie, 'Run the server with DEV_LOGIN=1 and TEACHER_EMAILS including FEYN_TEACHER_EMAIL.');
 async function request(path, options) {
-  const headers = { cookie, origin: base, ...options?.headers };
+  const headers = { cookie, origin: base, authorization: `Bearer ${process.env.MCP_TOKEN ?? ''}`, ...options?.headers };
   const response = await fetch(base + path, { ...options, headers, signal: AbortSignal.timeout(120000) });
   const data = await response.json();
   assert.equal(response.ok, true, `${path}: ${data.error ?? response.status}`);
@@ -50,7 +50,7 @@ assert.equal(corrected.corrections[0].before, before);
 assert.equal(corrected.corrections[0].after, replacement);
 const assessed = await request(`/api/attempts/${attempt.id}/submit`, post({ answerId: main.answer.id }));
 assert.equal(assessed.mainAssessment.outcome, 'pass');
-assert.equal(assessed.mainAssessment.provider, 'Local AI gateway');
+assert.equal(assessed.mainAssessment.provider, status.providers.assessor);
 assert.deepEqual(assessed.mainAssessment.criteria.map(c => c.state), ['demonstrated', 'demonstrated', 'demonstrated']);
 const earned = (await request('/api/teacher')).learners.find(learner => learner.id === attempt.learnerId)?.completedAt;
 assert.equal(typeof earned, 'string');

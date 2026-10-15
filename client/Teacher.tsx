@@ -217,11 +217,11 @@ export function Teacher({
         </div>
       )}
       <div className="integration-note">
-        <span className="section-label">CONNECTED TO YOUR LOCAL APP</span>
+        <span className="section-label">MCP ACCESS</span>
         <p>
           Read-only MCP tools are available at{" "}
-          <code>{location.origin}/mcp</code>. U-Bot can reach them through the
-          Feyn bridge Chrome extension.
+          <code>{location.origin}/mcp</code> to clients holding the server’s MCP
+          token.
         </p>
       </div>
     </div>

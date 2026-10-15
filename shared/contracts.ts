@@ -141,7 +141,11 @@ export const bootstrapSchema = z.object({
   lesson: lessonSchema,
   learner: learnerSchema,
   attempts: z.array(attemptSchema),
-  providers: z.object({ transcription: z.boolean(), assessment: z.boolean() }),
+  providers: z.object({
+    transcription: z.boolean(),
+    assessment: z.boolean(),
+    assessor: z.string(),
+  }),
   profile: profileSchema,
 });
 export type Bootstrap = z.infer<typeof bootstrapSchema>;
@@ -177,6 +181,7 @@ export const teacherReviewRequestSchema = z.object({
   note: z.string().trim().min(1).max(3000),
   criteria: z.array(criterionSchema).length(3),
 });
+export const maxAudioBytes = 4 * 1024 * 1024;
 export const submissionSchema = z.object({ answerId: z.string().uuid() });
 export function words(text: string): string[] {
   return text.match(/\S+/g) ?? [];

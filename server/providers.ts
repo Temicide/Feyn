@@ -14,7 +14,15 @@ const environment = z
     ANTHROPIC_MODEL: z.string().optional(),
   })
   .parse(process.env);
+const assessor = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(
+  environment.ANTHROPIC_BASE_URL
+    ? new URL(environment.ANTHROPIC_BASE_URL).hostname
+    : "",
+)
+  ? "Local AI gateway"
+  : "Anthropic-compatible API";
 export const providerStatus = {
+  assessor,
   transcription: Boolean(environment.ELEVENLABS_API_KEY),
   assessment: Boolean(
     environment.ANTHROPIC_API_KEY &&
@@ -86,31 +94,34 @@ async function reach(
 async function gateway(system: string, payload: unknown): Promise<unknown> {
   if (!providerStatus.assessment)
     throw new Error(
-      "Local AI gateway is not configured. Set ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, and ANTHROPIC_MODEL on the server.",
+      `${assessor} is not configured. Set ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, and ANTHROPIC_MODEL on the server.`,
     );
   const response = await reach(
-    "Local AI gateway",
+    assessor,
     "Check that it is running, then retry. No conceptual result was recorded.",
     () =>
-      fetch(`${environment.ANTHROPIC_BASE_URL?.replace(/\/$/, "")}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": environment.ANTHROPIC_API_KEY ?? "",
-        "anthropic-version": "2023-06-01",
-      },
-      signal: AbortSignal.timeout(120000),
-      body: JSON.stringify({
-        model: environment.ANTHROPIC_MODEL,
-        max_tokens: 2500,
-        system,
-        messages: [{ role: "user", content: JSON.stringify(payload) }],
-      }),
-    }),
+      fetch(
+        `${environment.ANTHROPIC_BASE_URL?.replace(/\/$/, "")}/v1/messages`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": environment.ANTHROPIC_API_KEY ?? "",
+            "anthropic-version": "2023-06-01",
+          },
+          signal: AbortSignal.timeout(120000),
+          body: JSON.stringify({
+            model: environment.ANTHROPIC_MODEL,
+            max_tokens: 2500,
+            system,
+            messages: [{ role: "user", content: JSON.stringify(payload) }],
+          }),
+        },
+      ),
   );
   if (!response.ok)
     throw new Error(
-      `Local AI gateway returned HTTP ${response.status}. No conceptual result was recorded.`,
+      `${assessor} returned HTTP ${response.status}. No conceptual result was recorded.`,
     );
   const body = responseSchema.parse(await response.json());
   const text = body.content
@@ -124,7 +135,7 @@ async function gateway(system: string, payload: unknown): Promise<unknown> {
     return JSON.parse(text);
   } catch {
     throw new Error(
-      "Local AI gateway returned an unreadable assessment. No conceptual result was recorded.",
+      `${assessor} returned an unreadable assessment. No conceptual result was recorded.`,
     );
   }
 }
@@ -138,7 +149,8 @@ export async function assessMain(
           id: c.id,
           state: "demonstrated",
           quote: transcript,
-          reason: "Scripted walkthrough marks this concept demonstrated without reading the words.",
+          reason:
+            "Scripted walkthrough marks this concept demonstrated without reading the words.",
         })),
         majorError: false,
         summary:
@@ -158,7 +170,7 @@ export async function assessMain(
     kind: "main",
     ...result,
     outcome: deriveOutcome(result.criteria, result.majorError),
-    provider: scripted ? "Scripted sample walkthrough" : "Local AI gateway",
+    provider: scripted ? "Scripted sample walkthrough" : assessor,
     model: scripted ? "authored-example" : (environment.ANTHROPIC_MODEL ?? ""),
     at: new Date().toISOString(),
   };
@@ -206,12 +218,14 @@ export async function assessDiagnostic(
     ? {
         outcome: "correct",
         quote: transcript,
-        reason: "Scripted walkthrough marks this answer correct without reading the words.",
+        reason:
+          "Scripted walkthrough marks this answer correct without reading the words.",
         observations: (question?.conceptIds ?? []).map((id) => ({
           id,
           state: "demonstrated",
           quote: transcript,
-          reason: "Scripted walkthrough marks this concept demonstrated without reading the words.",
+          reason:
+            "Scripted walkthrough marks this concept demonstrated without reading the words.",
         })),
       }
     : await gateway(
@@ -222,7 +236,7 @@ export async function assessDiagnostic(
   return {
     kind: "diagnostic",
     ...result,
-    provider: scripted ? "Scripted sample walkthrough" : "Local AI gateway",
+    provider: scripted ? "Scripted sample walkthrough" : assessor,
     model: scripted ? "authored-example" : (environment.ANTHROPIC_MODEL ?? ""),
     at: new Date().toISOString(),
   };

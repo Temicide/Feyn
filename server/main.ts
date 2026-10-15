@@ -1,6 +1,6 @@
 import express from "express";
 import multer from "multer";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { Attempts, belongsTo } from "./attempts.js";
@@ -15,6 +15,7 @@ import {
 } from "./providers.js";
 import {
   createAttemptSchema,
+  maxAudioBytes,
   profileSchema,
   replacementSchema,
   teacherReviewRequestSchema,
@@ -49,13 +50,9 @@ export function createApp(
   app.use((req, res, next) => {
     const origin = req.get("origin");
     const safe = req.method === "GET" || req.method === "HEAD";
-    const bridge =
-      req.path === "/mcp" && origin?.startsWith("chrome-extension://");
     if (
       !hosts.includes(req.get("host") ?? "") ||
-      (origin
-        ? !origins.includes(origin) && !bridge
-        : !safe && req.path !== "/mcp")
+      (origin ? !origins.includes(origin) : !safe && req.path !== "/mcp")
     ) {
       res.status(403).json({ error: "This host or origin is not allowed." });
       return;
@@ -66,7 +63,7 @@ export function createApp(
   app.use("/api", router);
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+    limits: { fileSize: maxAudioBytes, files: 1 },
   });
   const answerKind = z.enum(["main", "followup-1", "followup-2"]);
   function id(value: unknown): string {
@@ -339,6 +336,16 @@ export function createApp(
       },
     }),
   );
+  app.use("/mcp", (req, res, next) => {
+    if (!env.MCP_TOKEN) throw new HttpError(404, "Not found.");
+    const given = Buffer.from(req.get("authorization") ?? ""),
+      expected = Buffer.from(`Bearer ${env.MCP_TOKEN}`);
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
+      res.set("WWW-Authenticate", "Bearer");
+      throw new HttpError(401, "MCP token required.");
+    }
+    next();
+  });
   app.post("/mcp", async (req, res) => {
     const message = rpcSchema.parse(req.body);
     if (message.id === undefined) {
@@ -353,7 +360,7 @@ export function createApp(
           capabilities: { tools: {} },
           serverInfo: { name: "feyn", version: "0.1.0" },
           instructions:
-            "Local prototype. Sample records are illustrative. Teacher review retains final judgment.",
+            "Feyn prototype. Sample records are illustrative. Teacher review retains final judgment.",
         };
         break;
       case "ping":
@@ -399,12 +406,6 @@ export function createApp(
     res.json({ jsonrpc: "2.0", id: message.id, result });
   });
   app.get("/mcp", (_req, res) => res.status(405).set("Allow", "POST").end());
-  if (process.env.NODE_ENV === "production") {
-    app.use(express.static("dist"));
-    app.get("/{*path}", (_req, res) =>
-      res.sendFile(resolve("dist/index.html")),
-    );
-  }
   app.use(
     (
       error: unknown,
@@ -412,6 +413,16 @@ export function createApp(
       res: express.Response,
       _next: express.NextFunction,
     ) => {
+      if (
+        error instanceof multer.MulterError &&
+        error.code === "LIMIT_FILE_SIZE"
+      ) {
+        res.status(413).json({
+          error:
+            "Recordings are limited to 4 MB. Record a shorter explanation or upload a smaller file.",
+        });
+        return;
+      }
       const message =
         error instanceof z.ZodError
           ? "The request or provider response did not match the expected format. No conceptual result was recorded."
@@ -425,7 +436,15 @@ export function createApp(
   );
   return app;
 }
-if (import.meta.main)
-  createApp().listen(port, "127.0.0.1", () =>
+if (import.meta.main) {
+  const app = createApp();
+  if (process.env.NODE_ENV === "production") {
+    app.use(express.static("dist"));
+    app.get("/{*path}", (_req, res) =>
+      res.sendFile(resolve("dist/index.html")),
+    );
+  }
+  app.listen(port, "127.0.0.1", () =>
     process.stdout.write(`Feyn API listening at http://127.0.0.1:${port}\n`),
   );
+}

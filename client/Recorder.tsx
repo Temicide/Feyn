@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import {
   answerSchema,
+  maxAudioBytes,
   reviewedTranscript,
   words,
   type Answer,
@@ -60,6 +61,13 @@ export function Recorder({
     provenance: "microphone" | "uploaded-recording",
     name: string,
   ) {
+    if (blob.size > maxAudioBytes) {
+      setState({ kind: "idle" });
+      setError(
+        "Recordings are limited to 4 MB. Record a shorter explanation or upload a smaller file.",
+      );
+      return;
+    }
     setState({ kind: "processing" });
     setError("");
     const data = new FormData();
@@ -98,7 +106,7 @@ export function Recorder({
         microphone.current.release();
         return;
       }
-      const device = new MediaRecorder(media);
+      const device = new MediaRecorder(media, { audioBitsPerSecond: 32000 });
       recorder.current = device;
       const chunks: BlobPart[] = [];
       device.ondataavailable = (e) => {
@@ -216,7 +224,7 @@ export function Recorder({
             </button>
           )}
           <p className="fine-print">
-            English · No time limit · Review before you send
+            English · Recordings up to 4 MB · Review before you send
           </p>
         </>
       )}

@@ -1,38 +1,48 @@
-# Run Feyn locally
+# Feyn
 
 Feyn lets a student explain a calculus idea aloud to Pip, then lets a teacher inspect the recording and assessment. The classroom and all character art are original.
 
-## Start the app
+Students and teachers sign in with Google. Records live in MongoDB, and the app is hosted on Vercel.
 
-Use Node.js 26 or newer. The server uses Node's built-in SQLite module.
+## Start the app locally
+
+Use Node.js 24 or newer.
 
 ```sh
 git clone https://github.com/Temicide/Feyn.git
 cd Feyn
 npm install
-npm run dev
+DEV_LOGIN=1 TEACHER_EMAILS=teacher@example.com npm run dev
 ```
 
-Open [Feyn at localhost](http://127.0.0.1:5173). Vite serves the browser on port 5173 and proxies API calls to the loopback server on port 4173. Both processes stop with Ctrl+C.
+Open [Feyn at localhost](http://127.0.0.1:5173). Vite serves the browser on port 5173 and proxies `/api` and `/mcp` to the API server on port 4173. Both processes stop with Ctrl+C.
 
-The **Your classroom** tab contains the lesson. The **Teacher's desk** tab shows saved evidence and the class recap. The teacher selects Pip's Curious or Playful profile for new attempts.
+Without `MONGODB_URI`, records stay in memory and disappear when the API restarts. Without Google credentials, the sign-in page offers a local test account when `DEV_LOGIN=1`. Sign in as `teacher@example.com` to open the **Teacher's desk**. Any other email signs in as a student.
+
+To use real storage and Google sign-in locally, copy `.env.example` to `.env` and fill in the values. `.env.example` explains each variable in one line. The API loads `.env` at startup, and existing process environment values take precedence. Restart the API after changing it.
+
+## Deploy to Vercel
+
+1. Create a MongoDB database, for example a MongoDB Atlas cluster, and allow connections from Vercel.
+2. In Google Cloud Console, create an OAuth client of type **Web application**. Add `https://<your-domain>/api/auth/callback` as an authorized redirect URI. Add `http://127.0.0.1:5173/api/auth/callback` too if you want Google sign-in during local development.
+3. Import the repository into Vercel. `vercel.json` sets the build command, the `dist` output directory, and the rewrites. `api/index.ts` serves every `/api/*` request and `/mcp`.
+4. In the Vercel project settings, set `MONGODB_URI`, `SESSION_SECRET`, `APP_ORIGIN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `TEACHER_EMAILS`. Set `MONGODB_DB`, `MCP_TOKEN`, `ELEVENLABS_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_MODEL` as needed. `APP_ORIGIN` must be the exact public origin, such as `https://feyn.example.com`.
+
+A function missing `MONGODB_URI`, `SESSION_SECRET`, or `APP_ORIGIN` answers every API request with HTTP 500 and names the missing variable. `DEV_LOGIN` has no effect on Vercel. Requests whose host is not `APP_ORIGIN`, such as preview deployment URLs, are refused.
+
+## Accounts and roles
+
+Google sign-in uses the authorization code flow with state and PKCE. The server verifies the ID token's signature, issuer, audience, and verified email. The session is an HttpOnly, SameSite=Lax cookie signed with `SESSION_SECRET` and valid for seven days.
+
+A signed-in account whose email appears in `TEACHER_EMAILS` is a teacher. Everyone else is a student. The role is fixed when the session starts, so a change to `TEACHER_EMAILS` applies at the next sign-in.
+
+Students see only their own attempts and recordings. Teachers see the teacher's desk, every attempt and recording, Pip's profile setting, and review controls. Every state-changing request must carry an allowed `Origin`.
 
 ## Configure live providers
 
-Copy `.env.example` to `.env` at the repository root, then set your provider values. The server loads this file at startup. Restart the server after changing it. Keep credentials on the server.
+Live recording and audio upload use ElevenLabs batch speech recognition with `scribe_v2` and English language code `eng`. Assessment uses the configured Anthropic-compatible Messages endpoint. A loopback `ANTHROPIC_BASE_URL` is labeled **Local AI gateway**. Any other host is labeled **Anthropic-compatible API**.
 
-```dotenv
-ELEVENLABS_API_KEY=your-elevenlabs-key
-ANTHROPIC_BASE_URL=http://your-local-compatible-gateway
-ANTHROPIC_API_KEY=your-gateway-key
-ANTHROPIC_MODEL=your-configured-proxy-model
-```
-
-The running environment can also supply these variables. Existing process environment values take precedence over the file.
-
-Live recording and audio upload use ElevenLabs batch speech recognition with `scribe_v2` and English language code `eng`. Assessment uses the configured Anthropic-compatible Messages endpoint and is labeled **Local AI gateway**. The application does not claim a native Anthropic model identity or an established U-Bot connection.
-
-Use **Enter the classroom** to record through the microphone or upload an existing audio recording. Upload sends the actual audio to ElevenLabs. It does not accept a typed explanation. Review the transcript, optionally replace up to three individual words, then select **Send to Pip**. Submitted evidence is immutable. Larger changes require a new recording.
+Use **Enter the classroom** to record through the microphone or upload an existing audio recording. Recordings and uploads are limited to 4 MB because Vercel limits request bodies to 4.5 MB. The microphone records at 32 kbps, so 4 MB holds about 15 minutes of speech. Upload sends the actual audio to ElevenLabs. It does not accept a typed explanation. Review the transcript, optionally replace up to three individual words, then select **Send to Pip**. Submitted evidence is immutable. Larger changes require a new recording.
 
 The first application question is required. The second is optional. A correct main explanation earns completion independently of either diagnostic answer. Later practice can update the current evidence without removing earned completion.
 
@@ -42,11 +52,11 @@ Provider setup and request failures remain operational errors. An unreachable pr
 
 Select **Take a clearly labeled sample walkthrough** on the lesson page. Then select **Use the prepared sample transcript** in the recording panel. The scene offers prepared follow-up transcripts as well.
 
-Sample attempts belong to the separate **You · walkthrough** learner. They cannot grant the real learner's completion or change that learner's current concept evidence. The sample transcripts have no original recording attached. A configured gateway assesses the prepared words. Without a configured gateway, the sample uses an explicitly labeled scripted assessment.
+Sample attempts belong to a separate learner named after the student, such as **Ada · walkthrough**. They cannot grant the student's own completion or change that student's current concept evidence. The sample transcripts have no original recording attached. A configured assessor assesses the prepared words. Without one, the sample uses an explicitly labeled scripted assessment.
 
-The file `public/sample-audio/main.wav` is synthetic spoken example audio. It is separate from the prepared transcript fixture. To check real speech recognition, upload the WAV through **Upload a recording**. The resulting transcript comes from ElevenLabs and may differ from the prepared sample words. Choose the live classroom path if you want that recording to belong to the real learner.
+The file `public/sample-audio/main.wav` is synthetic spoken example audio. It is separate from the prepared transcript fixture. To check real speech recognition, upload the WAV through **Upload a recording**. The resulting transcript comes from ElevenLabs and may differ from the prepared sample words.
 
-Maya, Noah, Eli, and June in the teacher's desk are authored example classmates. They illustrate a current gap, a persistent gap, a resolved gap, and missing evidence. They are not classroom validation or evidence of a learning benefit.
+Maya, Noah, Eli, and June in the teacher's desk are authored example classmates, seeded once per database. They illustrate a current gap, a persistent gap, a resolved gap, and missing evidence. They are not classroom validation or evidence of a learning benefit.
 
 ## Inspect teacher evidence
 
@@ -62,7 +72,13 @@ npm run typecheck
 npm run build
 ```
 
-The policy tests run against real in-memory SQLite. They cover completion with a wrong diagnostic, weaker retries, sample separation, ordered corrections and immutable originals, invalid model evidence, late assessment responses, timestamped concept recap, conservative support deferral, microphone lifetime, loopback Host and Origin restrictions, and required or bounded follow-ups.
+The tests run the policy against the in-memory store. They cover completion with a wrong diagnostic, weaker retries, sample separation, ordered corrections and immutable originals, invalid model evidence, late assessment responses, timestamped concept recap, conservative support deferral, microphone lifetime, Host and Origin restrictions, sign-in, roles, attempt ownership, the MCP token, the upload limit, and missing Vercel configuration.
+
+To run the same lesson flow against MongoDB, point `MONGODB_TEST_URI` at a server. The test creates a throwaway database and drops it afterwards.
+
+```sh
+MONGODB_TEST_URI=mongodb://127.0.0.1:27017 npm test
+```
 
 To serve the production build on one port, stop the development processes, then run the following commands.
 
@@ -73,18 +89,18 @@ npm start
 
 Open [the production app](http://127.0.0.1:4173). Set `PORT` to serve on another loopback port. The development proxy expects 4173.
 
-## Attach a local MCP client
+`scripts/verify-live.mjs` exercises real providers against a running local server. Start the server with `DEV_LOGIN=1`, `TEACHER_EMAILS` including `FEYN_TEACHER_EMAIL` (default `teacher@example.com`), `MCP_TOKEN`, and both providers configured, then run `MCP_TOKEN=<token> node scripts/verify-live.mjs`. It sends synthetic audio to ElevenLabs and text to the configured assessor, which may incur provider charges.
 
-The server exposes a stateless Streamable HTTP MCP endpoint at `http://127.0.0.1:4173/mcp`. It supports `initialize`, `ping`, `tools/list`, and `tools/call` with protocol version `2025-03-26`.
+## Attach an MCP client
 
-The read tools are `get_assignment`, `get_class_recap`, `list_attempts`, and `get_teacher_evidence`. `get_class_recap` returns per-concept counts without learner names. They read the same persisted records and policy projection as the app. A client must support Streamable HTTP with JSON responses. There is no SSE subscription or standalone stdio transport.
+Set `MCP_TOKEN` to expose a stateless Streamable HTTP MCP endpoint at `/mcp`. Clients send `Authorization: Bearer <MCP_TOKEN>`. Without `MCP_TOKEN`, `/mcp` answers 404. It supports `initialize`, `ping`, `tools/list`, and `tools/call` with protocol version `2025-03-26`.
 
-U-Bot has no MCP client. The [Feyn bridge extension](extension/README.md) lets U-Bot request these tools through a JSON chat protocol. Each tool run and each message needs a click in the bridge panel. Feyn accepts `chrome-extension://` origins on `/mcp` only.
+The read tools are `get_assignment`, `get_class_recap`, `list_attempts`, and `get_teacher_evidence`. `get_class_recap` returns per-concept counts without learner names. The other tools return the same teacher-level records as the teacher's desk, so treat the token like a teacher account. A client must support Streamable HTTP with JSON responses. There is no SSE subscription or standalone stdio transport.
 
-## Local data and limits
+## Data and limits
 
-SQLite records live in `data/lesson.sqlite`, and original recordings live in `data/audio/`. The database and audio survive server restarts. `.env`, `data/`, `.audit/`, `node_modules/`, and `dist/` are ignored by Git. Browser reloads retain earned completion and teacher evidence. An unfinished scene's presentation position is not restored after reload.
+MongoDB holds one collection each for learners, attempts, and answers, plus `settings`, `counters`, and the GridFS bucket `audio` for original recordings. Browser reloads retain earned completion and teacher evidence. An unfinished scene's presentation position is not restored after reload.
 
-This is a local, single-learner prototype. It has no sign-in, enrollment, assignment editor, production authorization, or remote deployment. The app and MCP server bind to loopback. The teacher's desk is available to anyone who can access this local app. Do not expose the server publicly without adding authentication and authorization.
+Every request reads whole collections, which suits a single class but not a large school. There is no enrollment or assignment editor. Every signed-in account, including a teacher, appears in the class recap as a learner.
 
-The interface uses hosted Google fonts with system fallbacks. Microphone capture requires browser permission. Uploading an audio file is an alternate input method. Audio uploads are limited to 25 MB. Full spoken child dialogue is not included; optional character blips are muted by default and pause during recording.
+The interface uses hosted Google fonts with system fallbacks. Microphone capture requires browser permission. Uploading an audio file is an alternate input method. Full spoken child dialogue is not included; optional character blips are muted by default and pause during recording.
