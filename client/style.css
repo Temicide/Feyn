@@ -2426,10 +2426,11 @@ fieldset:disabled select {
     font-size: 28px;
   }
 }
+/* The game screen's motion is the dialogue itself, so it opts out. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  :not(.game-screen, .game-screen *),
+  :not(.game-screen, .game-screen *)::before,
+  :not(.game-screen, .game-screen *)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
