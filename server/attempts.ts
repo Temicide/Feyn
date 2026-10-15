@@ -165,11 +165,11 @@ export class Attempts {
     if (!found) throw new Error("Learner missing.");
     return found;
   }
-  async signIn(id: string, name: string): Promise<Learner> {
+  async signIn(id: string, name: string, teacher: boolean): Promise<Learner> {
     const existing = (await this.learners()).find((l) => l.id === id);
     const learner = existing
-      ? { ...existing, name }
-      : { id, name, sample: false, completedAt: null };
+      ? { ...existing, name, teacher }
+      : { id, name, sample: false, teacher, completedAt: null };
     await this.store.put("learner", learner);
     return learner;
   }
@@ -206,6 +206,7 @@ export class Attempts {
         id: walkthroughId(learnerId),
         name: `${learner.name.trim().split(/\s+/)[0] || "You"} · walkthrough`,
         sample: true,
+        teacher: false,
         completedAt: null,
       });
     const attempt: Attempt = {
@@ -406,11 +407,12 @@ export class Attempts {
       this.attempts(),
       this.answers(),
     ]);
+    const roster = learners.filter((l) => !l.teacher);
     return {
-      learners,
+      learners: roster,
       attempts,
       answers,
-      recap: projectRecap(learners, attempts),
+      recap: projectRecap(roster, attempts),
     };
   }
   private async grant(
@@ -438,6 +440,7 @@ export class Attempts {
         id,
         name,
         sample: true,
+        teacher: false,
         completedAt: null,
       });
     const cases = [

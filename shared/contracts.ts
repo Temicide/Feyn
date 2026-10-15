@@ -94,6 +94,7 @@ export const learnerSchema = z.object({
   id: z.string(),
   name: z.string(),
   sample: z.boolean(),
+  teacher: z.boolean().default(false),
   completedAt: z.string().nullable(),
 });
 export type Learner = z.infer<typeof learnerSchema>;

@@ -37,7 +37,7 @@ export function createApp(
   const store = new Attempts(records);
   const config = authConfig(env);
   const { router, caller, teacher } = auth(config, (session) =>
-    store.signIn(session.sub, session.name),
+    store.signIn(session.sub, session.name, session.role === "teacher"),
   );
   const hosts = [...loopback, ...(config.origin ? [config.origin.host] : [])];
   const origins = [
@@ -101,7 +101,7 @@ export function createApp(
   }
   app.get("/api/bootstrap", async (req, res) => {
     const session = caller(req);
-    const learner = await store.signIn(session.sub, session.name);
+    const learner = await store.signIn(session.sub, session.name, session.role === "teacher");
     res.json({
       lesson,
       learner,

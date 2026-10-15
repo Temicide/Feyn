@@ -371,6 +371,7 @@ test("Google callback verifies the ID token, creates a learner, and starts a ses
       id: "google:google-sub-1234",
       name: "Ada Lovelace",
       sample: false,
+      teacher: false,
       completedAt: null,
     },
   );

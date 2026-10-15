@@ -42,7 +42,7 @@ const wrong: DiagnosticAssessment = {
 
 async function lessonFlow(records: () => RecordStore) {
   const store = new Attempts(records());
-  const learner = await store.signIn("google:ada", "Ada Lovelace");
+  const learner = await store.signIn("google:ada", "Ada Lovelace", false);
   const attempt = await store.create(learner.id, "curious", false, false);
   const bytes = Buffer.from("original recording bytes");
   await records().putAudio("rec-1", bytes, "audio/wav");
@@ -75,7 +75,7 @@ async function lessonFlow(records: () => RecordStore) {
   );
   await store.recordDiagnostic(current.id, wrong, "Yes, seven.");
   await store.finish(attempt.id);
-  await store.signIn("google:ada", "Ada L.");
+  await store.signIn("google:ada", "Ada L.", false);
 
   const reopened = new Attempts(records());
   const teacher = await reopened.teacher();

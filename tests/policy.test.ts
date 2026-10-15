@@ -75,7 +75,7 @@ function diagnostic(
 const you = "google:you";
 async function fresh(): Promise<Attempts> {
   const store = new Attempts(new MemoryStore());
-  await store.signIn(you, "You");
+  await store.signIn(you, "You", false);
   return store;
 }
 async function submitMain(
