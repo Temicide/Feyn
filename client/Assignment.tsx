@@ -61,7 +61,9 @@ export function AssignmentPage({
     () => setContext(bootstrap?.courseTitle ?? ""),
     [bootstrap?.courseTitle, setContext],
   );
-  useEffect(() => window.scrollTo(0, 0), [stage.kind]);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [stage.kind]);
   async function start(sample: boolean) {
     setError("");
     try {

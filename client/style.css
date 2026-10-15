@@ -51,6 +51,7 @@
   background: var(--bg);
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
+  scrollbar-gutter: stable;
 }
 * {
   box-sizing: border-box;
