@@ -1994,6 +1994,7 @@ a.link-button {
 .join-row {
   display: flex;
   gap: 8px;
+  min-width: 0;
 }
 .join-row input {
   flex: 1;
