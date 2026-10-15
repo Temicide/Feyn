@@ -117,18 +117,20 @@ function Classroom({
   return (
     <div className="app">
       <header className="appbar">
-        <a
-          className="appbar-brand"
-          aria-label="Feyn, back to your courses"
-          href={href({ kind: "courses" })}
-        >
-          <img src="/brand/feyn-logo.png" alt="" />
-        </a>
-        {context && (
-          <p className="appbar-class">
-            <span>{context}</span>
-          </p>
-        )}
+        <div className="appbar-left">
+          <a
+            className="appbar-brand"
+            aria-label="Feyn, back to your courses"
+            href={href({ kind: "courses" })}
+          >
+            <img src="/brand/feyn-logo.png" alt="" />
+          </a>
+          {context && (
+            <p className="appbar-class">
+              <span>{context}</span>
+            </p>
+          )}
+        </div>
         <nav className="appbar-tabs" aria-label="Main navigation">
           <a
             aria-current={!teaching ? "page" : undefined}
@@ -175,7 +177,11 @@ function Page({
   me: Me;
   setContext: (text: string) => void;
 }) {
-  if (me.role !== "teacher" && route.kind !== "course" && route.kind !== "assignment")
+  if (
+    me.role !== "teacher" &&
+    route.kind !== "course" &&
+    route.kind !== "assignment"
+  )
     return <StudentHome setContext={setContext} />;
   switch (route.kind) {
     case "courses":

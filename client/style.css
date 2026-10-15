@@ -467,13 +467,20 @@ details > div {
   position: sticky;
   top: 0;
   z-index: 10;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
   min-height: 64px;
   padding: 0 20px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
+}
+.appbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
 }
 .appbar-brand {
   display: flex;
@@ -500,7 +507,6 @@ details > div {
   display: flex;
   align-self: stretch;
   gap: 4px;
-  margin: 0 auto;
 }
 .appbar-tabs a {
   position: relative;
@@ -533,7 +539,9 @@ details > div {
 .account {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
+  min-width: 0;
 }
 .account-name {
   font-weight: 700;
@@ -2290,9 +2298,13 @@ fieldset:disabled select {
 /* ---------- Small screens ---------- */
 @media (max-width: 860px) {
   .appbar {
+    display: flex;
     flex-wrap: wrap;
     padding: 6px 16px 0;
     gap: 8px 12px;
+  }
+  .appbar-left {
+    flex: 1;
   }
   .appbar-class {
     display: none;
