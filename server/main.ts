@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { Attempts, belongsTo } from "./attempts.js";
+import { auth, authConfig, HttpError } from "./auth.js";
 import { openStore, type RecordStore } from "./store.js";
 import { lesson } from "./lesson.js";
 import {
@@ -24,34 +25,45 @@ import {
 } from "../shared/contracts.js";
 
 const port = Number(process.env.PORT ?? 4173);
-const hosts = [port, 5173].flatMap((p) =>
+const loopback = [port, 5173].flatMap((p) =>
   ["127.0.0.1", "localhost", "[::1]"].map((name) => `${name}:${p}`),
 );
-const origins = hosts.map((host) => `http://${host}`);
-
-const local = { id: "local:you", name: "You" };
 
 export function createApp(
   records: RecordStore = openStore(process.env),
+  env: NodeJS.ProcessEnv = process.env,
 ): express.Express {
   const store = new Attempts(records);
+  const config = authConfig(env);
+  const { router, caller, teacher } = auth(config, (session) =>
+    store.signIn(session.sub, session.name),
+  );
+  const hosts = [...loopback, ...(config.origin ? [config.origin.host] : [])];
+  const origins = [
+    ...loopback.map((host) => `http://${host}`),
+    ...(config.origin ? [config.origin.origin] : []),
+  ];
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "100kb" }));
   app.use((req, res, next) => {
     const origin = req.get("origin");
+    const safe = req.method === "GET" || req.method === "HEAD";
     const bridge =
       req.path === "/mcp" && origin?.startsWith("chrome-extension://");
     if (
       !hosts.includes(req.get("host") ?? "") ||
-      (origin && !origins.includes(origin) && !bridge)
+      (origin
+        ? !origins.includes(origin) && !bridge
+        : !safe && req.path !== "/mcp")
     ) {
-      res.status(403).json({ error: "Local access only." });
+      res.status(403).json({ error: "This host or origin is not allowed." });
       return;
     }
     res.set("Cache-Control", "no-store");
     next();
   });
+  app.use("/api", router);
   const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 25 * 1024 * 1024, files: 1 },
@@ -60,8 +72,39 @@ export function createApp(
   function id(value: unknown): string {
     return z.string().uuid().parse(value);
   }
-  app.get("/api/bootstrap", async (_req, res) => {
-    const learner = await store.signIn(local.id, local.name);
+  async function ownAttempt(
+    req: express.Request,
+    attemptId: unknown,
+    teacherMayRead = false,
+  ) {
+    const session = caller(req),
+      wanted = id(attemptId),
+      attempt = (await store.attempts()).find((a) => a.id === wanted);
+    if (
+      !attempt ||
+      !(
+        belongsTo(attempt, session.sub) ||
+        (teacherMayRead && session.role === "teacher")
+      )
+    )
+      throw new HttpError(404, "Attempt not found.");
+    return attempt;
+  }
+  async function ownAnswer(
+    req: express.Request,
+    answerId: unknown,
+    teacherMayRead = false,
+  ) {
+    caller(req);
+    const wanted = id(answerId),
+      answer = (await store.answers()).find((a) => a.id === wanted);
+    if (!answer) throw new HttpError(404, "Recorded answer not found.");
+    await ownAttempt(req, answer.attemptId, teacherMayRead);
+    return answer;
+  }
+  app.get("/api/bootstrap", async (req, res) => {
+    const session = caller(req);
+    const learner = await store.signIn(session.sub, session.name);
     res.json({
       lesson,
       learner,
@@ -72,8 +115,12 @@ export function createApp(
       profile: await store.profile(),
     });
   });
-  app.get("/api/teacher", async (_req, res) => res.json(await store.teacher()));
+  app.get("/api/teacher", async (req, res) => {
+    teacher(req);
+    res.json(await store.teacher());
+  });
   app.put("/api/profile", async (req, res) => {
+    teacher(req);
     const profile = profileSchema.parse(
       z.object({ profile: profileSchema }).parse(req.body).profile,
     );
@@ -81,10 +128,11 @@ export function createApp(
     res.json({ profile });
   });
   app.post("/api/attempts", async (req, res) => {
+    const session = caller(req);
     const input = createAttemptSchema.parse(req.body);
     res.json(
       await store.create(
-        local.id,
+        session.sub,
         input.profile,
         input.sample,
         input.reviewedOpportunity,
@@ -92,15 +140,16 @@ export function createApp(
     );
   });
   app.get("/api/attempts/:id", async (req, res) =>
-    res.json(await store.get(id(req.params.id))),
+    res.json(await ownAttempt(req, req.params.id, true)),
   );
   app.post("/api/attempts/:id/sample", async (req, res) => {
+    const attempt = await ownAttempt(req, req.params.id);
     const kind = answerKind.parse(
       z.object({ kind: answerKind }).parse(req.body).kind,
     );
     res.json(
       await store.addAnswer(
-        id(req.params.id),
+        attempt.id,
         kind,
         "scripted-sample",
         kind === "main" ? sampleMain : sampleFollowups[kind],
@@ -112,6 +161,7 @@ export function createApp(
     "/api/attempts/:id/audio",
     upload.single("audio"),
     async (req, res) => {
+      const attempt = await ownAttempt(req, req.params.id);
       const kind = answerKind.parse(req.body.kind),
         provenance = z
           .enum(["microphone", "uploaded-recording"])
@@ -126,7 +176,7 @@ export function createApp(
       const audioId = randomUUID();
       await records.putAudio(audioId, req.file.buffer, req.file.mimetype);
       const answer = await store.addAnswer(
-        id(req.params.id),
+        attempt.id,
         kind,
         provenance,
         "",
@@ -155,7 +205,7 @@ export function createApp(
     },
   );
   app.post("/api/answers/:id/transcribe", async (req, res) => {
-    const answer = await store.answer(id(req.params.id));
+    const answer = await ownAnswer(req, req.params.id);
     const audio = answer.audioId
       ? await records.getAudio(answer.audioId)
       : null;
@@ -168,13 +218,12 @@ export function createApp(
     res.json(await store.setTranscript(answer.id, transcript));
   });
   app.patch("/api/answers/:id", async (req, res) => {
+    const answer = await ownAnswer(req, req.params.id);
     const input = replacementSchema.parse(req.body);
-    res.json(
-      await store.correct(id(req.params.id), input.index, input.replacement),
-    );
+    res.json(await store.correct(answer.id, input.index, input.replacement));
   });
   app.get("/api/answers/:id/audio", async (req, res) => {
-    const answer = await store.answer(id(req.params.id));
+    const answer = await ownAnswer(req, req.params.id, true);
     const audio = answer.audioId
       ? await records.getAudio(answer.audioId)
       : null;
@@ -195,7 +244,7 @@ export function createApp(
     res.send(audio.bytes);
   });
   app.post("/api/attempts/:id/submit", async (req, res) => {
-    const attempt = await store.get(id(req.params.id)),
+    const attempt = await ownAttempt(req, req.params.id),
       input = submissionSchema.parse(req.body),
       answer = await store.answer(input.answerId);
     if (answer.attemptId !== attempt.id)
@@ -224,9 +273,10 @@ export function createApp(
       );
   });
   app.post("/api/attempts/:id/finish", async (req, res) =>
-    res.json(await store.finish(id(req.params.id))),
+    res.json(await store.finish((await ownAttempt(req, req.params.id)).id)),
   );
   app.post("/api/attempts/:id/review", async (req, res) => {
+    teacher(req);
     const input = teacherReviewRequestSchema.parse(req.body);
     res.json(
       await store.review(
@@ -368,7 +418,9 @@ export function createApp(
           : error instanceof Error
             ? error.message
             : "The request failed.";
-      res.status(400).json({ error: message });
+      res
+        .status(error instanceof HttpError ? error.status : 400)
+        .json({ error: message });
     },
   );
   return app;

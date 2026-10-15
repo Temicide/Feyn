@@ -4,8 +4,13 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
 const base = process.env.FEYN_API_URL ?? 'http://127.0.0.1:4173';
 const root = new URL('../', import.meta.url);
+const email = process.env.FEYN_TEACHER_EMAIL ?? 'teacher@example.com';
+const signIn = await fetch(`${base}/api/auth/dev?${new URLSearchParams({ email, name: 'Live check' })}`, { redirect: 'manual' });
+const cookie = signIn.headers.getSetCookie().find(c => c.startsWith('feyn_session='))?.split(';')[0];
+assert.ok(cookie, 'Run the server with DEV_LOGIN=1 and TEACHER_EMAILS including FEYN_TEACHER_EMAIL.');
 async function request(path, options) {
-  const response = await fetch(base + path, { ...options, signal: AbortSignal.timeout(120000) });
+  const headers = { cookie, origin: base, ...options?.headers };
+  const response = await fetch(base + path, { ...options, headers, signal: AbortSignal.timeout(120000) });
   const data = await response.json();
   assert.equal(response.ok, true, `${path}: ${data.error ?? response.status}`);
   return data;
@@ -60,7 +65,7 @@ const evidence = await request('/api/teacher');
 const saved = evidence.answers.find(a => a.id === main.answer.id);
 assert.equal(saved.originalTranscript, original);
 assert.equal(saved.corrections.length, 1);
-const audio = await fetch(`${base}/api/answers/${main.answer.id}/audio`);
+const audio = await fetch(`${base}/api/answers/${main.answer.id}/audio`, { headers: { cookie } });
 assert.equal(audio.status, 200);
 assert.equal(createHash('sha256').update(Buffer.from(await audio.arrayBuffer())).digest('hex'), createHash('sha256').update(main.bytes).digest('hex'));
 const tools = await request('/mcp', post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }));

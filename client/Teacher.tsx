@@ -111,10 +111,10 @@ export function Teacher({
         <>
           <div className="sample-notice">
             <strong>Illustrative class, real evidence kept separate.</strong>{" "}
-            Maya, Noah, Eli, and June are authored sample classmates. “You ·
-            walkthrough” contains sample attempts. “You” contains this
-            browser’s saved work. These records do not demonstrate classroom
-            learning benefit.
+            Maya, Noah, Eli, and June are authored sample classmates. Learners
+            ending in “· walkthrough” hold each student’s labeled sample
+            attempts. Everyone else is a signed-in student. These records do not
+            demonstrate classroom learning benefit.
           </div>
           <div className="recap-table">
             <div className="recap-row recap-header">
@@ -221,7 +221,7 @@ export function Teacher({
         <p>
           Read-only MCP tools are available at{" "}
           <code>{location.origin}/mcp</code>. U-Bot can reach them through the
-          Feyn bridge Chrome extension. No classroom account system is included.
+          Feyn bridge Chrome extension.
         </p>
       </div>
     </div>

@@ -8,7 +8,11 @@ import {
   type Answer,
   type Attempt,
   type Bootstrap,
+  type Me,
   type Profile,
+  meSchema,
+  signInOptionsSchema,
+  type SignInOptions,
 } from "../shared/contracts.js";
 import { api, json } from "./api.js";
 import { Recorder } from "./Recorder.js";
@@ -26,7 +30,92 @@ type StudentStage =
       diagnosticAnswers: Answer[];
     }
   | { kind: "finished"; attempt: Attempt };
+type Session =
+  | { kind: "checking" }
+  | { kind: "signed-out"; options: SignInOptions }
+  | { kind: "signed-in"; me: Me };
 export function App() {
+  const [session, setSession] = useState<Session>({ kind: "checking" }),
+    [failure, setFailure] = useState("");
+  async function check() {
+    const response = await fetch("/api/me");
+    const raw: unknown = await response.json();
+    setSession(
+      response.status === 401
+        ? { kind: "signed-out", options: signInOptionsSchema.parse(raw) }
+        : { kind: "signed-in", me: meSchema.parse(raw) },
+    );
+  }
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("signin") === "failed") {
+      setFailure("Google sign-in did not finish. Try again.");
+      history.replaceState(null, "", "/");
+    }
+    void check().catch(() =>
+      setFailure("Could not reach Feyn. Reload to try again."),
+    );
+  }, []);
+  async function signOut() {
+    await api("/auth/logout", z.object({}), json("POST", {}));
+    await check();
+  }
+  if (session.kind === "signed-in")
+    return <Classroom me={session.me} onSignOut={signOut} />;
+  return (
+    <>
+      <main className="signin-page">
+        <img
+          src="/art/child-listening.svg"
+          alt="Pip, your curious learning partner"
+        />
+        <div className="eyebrow">
+          <span className="tiny-star">✦</span> FEYN · LEARN IT BY TEACHING IT
+        </div>
+        <h1>
+          Explain one idea to Pip.
+          <br />
+          <em>Watch it click.</em>
+        </h1>
+        <p>Sign in so your explanations and completion stay with you.</p>
+        {session.kind === "checking" ? (
+          <span className="thinking-dots">•••</span>
+        ) : (
+          <>
+            {session.options.google ? (
+              <a className="button primary" href="/api/auth/google">
+                Sign in with Google
+              </a>
+            ) : (
+              <p className="fine-print">
+                Google sign-in is not configured on this server.
+              </p>
+            )}
+            {session.options.devLogin && (
+              <form className="dev-login" action="/api/auth/dev" method="get">
+                <span className="section-label">LOCAL TEST ACCOUNT</span>
+                <input name="email" type="email" required placeholder="Email" />
+                <input name="name" placeholder="Name" />
+                <button className="button">Sign in locally</button>
+              </form>
+            )}
+          </>
+        )}
+        {failure && (
+          <p className="error" role="alert">
+            {failure}
+          </p>
+        )}
+      </main>
+    </>
+  );
+}
+function Classroom({
+  me,
+  onSignOut,
+}: {
+  me: Me;
+  onSignOut: () => Promise<void>;
+}) {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null),
     [view, setView] = useState<"student" | "teacher">("student"),
     [stage, setStage] = useState<StudentStage>({ kind: "assignment" }),
@@ -42,9 +131,7 @@ export function App() {
   }
   useEffect(() => {
     void load().catch((e) =>
-      setError(
-        e instanceof Error ? e.message : "Could not reach the local app.",
-      ),
+      setError(e instanceof Error ? e.message : "Could not reach Feyn."),
     );
   }, []);
   async function start(sample: boolean) {
@@ -159,18 +246,26 @@ export function App() {
           >
             Your classroom
           </button>
-          <button
-            className={view === "teacher" ? "active" : ""}
-            onClick={() => {
-              setTeacherAttemptId(null);
-              setView("teacher");
-            }}
-          >
-            Teacher’s desk
-          </button>
+          {me.role === "teacher" && (
+            <button
+              className={view === "teacher" ? "active" : ""}
+              onClick={() => {
+                setTeacherAttemptId(null);
+                setView("teacher");
+              }}
+            >
+              Teacher’s desk
+            </button>
+          )}
         </nav>
         <div className="header-note">
           A little teaching. A lot of understanding.
+        </div>
+        <div className="account">
+          <span title={me.email}>{me.name}</span>
+          <button className="text-button" onClick={() => void onSignOut()}>
+            Sign out
+          </button>
         </div>
       </header>
       <main>
@@ -179,7 +274,7 @@ export function App() {
             <span className="thinking-dots">•••</span>
             <p>{error || "Opening your classroom"}</p>
           </div>
-        ) : view === "teacher" ? (
+        ) : view === "teacher" && me.role === "teacher" ? (
           <Teacher
             selectedAttemptId={teacherAttemptId}
             lesson={bootstrap.lesson}
@@ -448,15 +543,17 @@ export function App() {
                   >
                     Back to your lesson
                   </button>
-                  <button
-                    className="button"
-                    onClick={() => {
-                      setTeacherAttemptId(stage.attempt.id);
-                      setView("teacher");
-                    }}
-                  >
-                    Open teacher evidence →
-                  </button>
+                  {me.role === "teacher" && (
+                    <button
+                      className="button"
+                      onClick={() => {
+                        setTeacherAttemptId(stage.attempt.id);
+                        setView("teacher");
+                      }}
+                    >
+                      Open teacher evidence →
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -467,7 +564,7 @@ export function App() {
         <span>
           feyn <span>✦</span> Ideas grow when you share them.
         </span>
-        <span>Local prototype · Evidence saved locally</span>
+        <span>Prototype · Evidence saved on the Feyn server</span>
       </footer>
     </>
   );

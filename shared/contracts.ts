@@ -145,6 +145,19 @@ export const bootstrapSchema = z.object({
   profile: profileSchema,
 });
 export type Bootstrap = z.infer<typeof bootstrapSchema>;
+export const meSchema = z.object({
+  learnerId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: z.enum(["teacher", "student"]),
+});
+export type Me = z.infer<typeof meSchema>;
+export const signInOptionsSchema = z.object({
+  error: z.string(),
+  google: z.boolean(),
+  devLogin: z.boolean(),
+});
+export type SignInOptions = z.infer<typeof signInOptionsSchema>;
 export const createAttemptSchema = z.object({
   profile: profileSchema,
   sample: z.boolean(),
