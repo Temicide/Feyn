@@ -20,13 +20,13 @@ Bind asynchronous work to answer/attempt identity so late results cannot attach 
 
 Identify each learner by the signed-in account (google:<sub>). Each learner's sample walkthrough belongs to a separate labeled learner, walkthrough:<learner id>, so it can never grant that learner's completion. Seed the authored classmates once per database. A student reaches only their own attempts; the teacher role, from TEACHER_EMAILS, reads all evidence and owns reviews and Pip's profile.
 
-## Synthesis decision
+## Why the server owns attempts
 
-The two independent candidates compared browser-owned IndexedDB sessions and server-owned durable attempts. The parent and independent judge chose server ownership because teacher inspection and original recordings are core deliverables. From the browser candidate, retain separate main/diagnostic types and the ordered correction-operation log. Detailed candidates and judgment remain in the ignored local .audit/design/ directory. The public agreed design is in docs/design/.
+Browser-owned IndexedDB sessions were considered and rejected because teacher inspection and original recordings are core deliverables. The separate main/diagnostic types and the ordered correction-operation log came from that alternative. The agreed design is in docs/design/.
 
-## Provider status
+## Providers
 
-A real request to the configured loopback Anthropic-compatible endpoint returned HTTP 200 and READY. Name a loopback endpoint Local AI gateway and any other endpoint Anthropic-compatible API, and retain its model identity in evidence. This is not a completed U-Bot connection. ElevenLabs Scribe v2 transcription has been verified with synthetic audio. Credentials remain in ignored server configuration. U-Bot has no MCP client or connector setting; its client calls only chat, code, transcription, media, and history endpoints. The Chrome extension bridge is retired. server/ubot.ts signs in through U-Bot's own Supabase password login and posts to its private /api/chat endpoint to draft the class recap plan. That endpoint is unpublished and can change without notice. Only names-free concept counts leave Feyn. Provider errors remain operational errors rather than conceptual failures.
+Name a loopback endpoint Local AI gateway and any other endpoint Anthropic-compatible API, and retain its model identity in evidence. Credentials stay in ignored server configuration. U-Bot has no MCP client or connector setting. server/ubot.ts signs in through U-Bot's own Supabase password login and posts to its private /api/chat endpoint to draft the class recap plan. That endpoint is unpublished and can change without notice. Only names-free concept counts leave Feyn. Provider errors remain operational errors rather than conceptual failures.
 
 Expose a standards-based MCP endpoint over the same application owner, only to clients holding MCP_TOKEN. A server endpoint is not evidence of a connected U-Bot host.
 

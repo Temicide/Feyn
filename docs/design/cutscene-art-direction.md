@@ -1,14 +1,10 @@
 # Cutscene art direction
 
-Cutscene design agreed on 15 October 2026. This document specifies the presentation of [the learning prototype](teaching-scene.md). This is the agreed design. See ../IMPLEMENTATION-STATUS.md for the implemented scope and remaining work.
+Cutscene design agreed on 15 October 2026. This document specifies the presentation of [the learning prototype](teaching-scene.md). See [the implementation status](../IMPLEMENTATION-STATUS.md) for the implemented scope and remaining work.
 
-## User-supplied references
+## References
 
-The user supplied three classroom screenshots and said, "Like this."
-
-These three saved images are the primary visual references for future cutscene implementation. Inspect all three before building the scene. Base the classroom composition, dialogue-box placement, border treatment, speaker portraits, and pixel-art proportions on them, together with the agreed behavior below. The files are stored in the project rather than depending on temporary chat attachments.
-
-The original uploaded screenshots remain saved in the project workspace under `brainstorm/references/cutscene/`. They guide composition, warmth, portraits, and dialogue treatment. This public repository ships original artwork in `public/art/` rather than copies of the reference game graphics.
+Three classroom screenshots from an existing game set the visual direction. They guide composition, warmth, portraits, and dialogue treatment. They are not part of this repository, which ships original artwork in `public/art/` instead.
 
 The references show a pixel-art classroom with a green board, warm wood floor, desks, and small characters. The dialogue screenshots place the room above a large black dialogue box with a white border. A monochrome speaker portrait sits beside large white text. Black space surrounds the room.
 

@@ -1,6 +1,6 @@
 # Little Lesson art reference
 
-The seven SVGs contain original pixel shapes. The three supplied references informed the classroom arrangement, warm floor, green board, and white dialogue portraits. Pip and the student are original human children.
+The seven SVGs in `public/art/` contain original pixel shapes. The three supplied references informed the classroom arrangement, warm floor, green board, and white dialogue portraits. Pip and the student are original human children.
 
 ## Assets and coordinates
 

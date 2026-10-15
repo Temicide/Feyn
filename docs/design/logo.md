@@ -1,6 +1,6 @@
 # Feyn logo
 
-The app header uses an original chunky pastel wordmark. Rounded letters and a white sticker border follow the visual family of the supplied references. A small speech-bubble sparkle suggests understanding. The four letters stay readable as a compact horizontal mark.
+The app header uses `public/brand/feyn-logo.png`, an original chunky pastel wordmark. Rounded letters and a white sticker border follow the visual family of the supplied references. A small speech-bubble sparkle suggests understanding. The four letters stay readable as a compact horizontal mark.
 
 The logo was generated with the built-in imagegen tool. Its PNG retains the generated alpha channel. The source images served as style references only.
 
