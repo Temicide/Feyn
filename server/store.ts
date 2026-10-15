@@ -1,14 +1,33 @@
 import { GridFSBucket, MongoClient } from "mongodb";
 import {
   answerSchema,
+  assignmentSchema,
   attemptSchema,
+  completionSchema,
+  courseSchema,
+  enrollmentSchema,
   learnerSchema,
+  teacherEmailSchema,
   type Answer,
+  type Assignment,
   type Attempt,
+  type Completion,
+  type Course,
+  type Enrollment,
   type Learner,
+  type TeacherEmail,
 } from "../shared/contracts.js";
 
-export type Records = { learner: Learner; attempt: Attempt; answer: Answer };
+export type Records = {
+  learner: Learner;
+  attempt: Attempt;
+  answer: Answer;
+  course: Course;
+  enrollment: Enrollment;
+  assignment: Assignment;
+  teacher: TeacherEmail;
+  completion: Completion;
+};
 export type Kind = keyof Records;
 export type Audio = { bytes: Buffer; mime: string };
 export interface RecordStore {
@@ -25,6 +44,11 @@ export class MemoryStore implements RecordStore {
     learner: new Map(),
     attempt: new Map(),
     answer: new Map(),
+    course: new Map(),
+    enrollment: new Map(),
+    assignment: new Map(),
+    teacher: new Map(),
+    completion: new Map(),
   };
   private settings = new Map<string, string>();
   private audio = new Map<string, Audio>();
@@ -52,6 +76,11 @@ const schemas = {
   learner: learnerSchema,
   attempt: attemptSchema,
   answer: answerSchema,
+  course: courseSchema,
+  enrollment: enrollmentSchema,
+  assignment: assignmentSchema,
+  teacher: teacherEmailSchema,
+  completion: completionSchema,
 };
 const clients = new Map<string, Promise<MongoClient>>();
 function connect(uri: string): Promise<MongoClient> {

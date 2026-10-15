@@ -1,29 +1,28 @@
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
 import {
-  profileSchema,
   reviewedTranscript,
   words,
   type Answer,
+  type Assignment,
   type Attempt,
+  type Completion,
   type Criterion,
   type Learner,
   type MainAssessment,
-  type Profile,
   type Review,
   type TeacherData,
 } from "../shared/contracts.js";
 import { deriveOutcome } from "./providers.js";
-import { lesson } from "./lesson.js";
+import { rubricOf } from "./rubric.js";
 import type { Kind, RecordStore, Records } from "./store.js";
 
-export function walkthroughId(learnerId: string): string {
-  return `walkthrough:${learnerId}`;
+export function walkthroughId(learnerId: string, courseId: string): string {
+  return `walkthrough:${learnerId}:${courseId}`;
 }
 export function belongsTo(attempt: Attempt, learnerId: string): boolean {
   return (
     attempt.learnerId === learnerId ||
-    attempt.learnerId === walkthroughId(learnerId)
+    attempt.learnerId.startsWith(`walkthrough:${learnerId}:`)
   );
 }
 export function replaceWord(
@@ -64,10 +63,12 @@ export function effectiveMain(attempt: Attempt): MainAssessment | null {
   };
 }
 export function projectRecap(
+  assignment: Pick<Assignment, "id" | "concepts">,
   learners: Learner[],
-  attempts: Attempt[],
+  allAttempts: Attempt[],
 ): TeacherData["recap"] {
-  return lesson.concepts.map((concept) => {
+  const attempts = allAttempts.filter((a) => a.assignmentId === assignment.id);
+  return assignment.concepts.map((concept) => {
     const row: TeacherData["recap"][number] = {
       id: concept.id,
       title: concept.title,
@@ -141,14 +142,12 @@ export function projectRecap(
 }
 
 export class Attempts {
-  private seeded: Promise<void> | null = null;
-  constructor(private store: RecordStore) {}
+  constructor(
+    private store: RecordStore,
+    private ready: () => Promise<void>,
+  ) {}
   private async list<K extends Kind>(kind: K): Promise<Records[K][]> {
-    this.seeded ??= this.seedSamples().catch((error: unknown) => {
-      this.seeded = null;
-      throw error;
-    });
-    await this.seeded;
+    await this.ready();
     return this.store.list(kind);
   }
   learners(): Promise<Learner[]> {
@@ -165,11 +164,11 @@ export class Attempts {
     if (!found) throw new Error("Learner missing.");
     return found;
   }
-  async signIn(id: string, name: string, teacher: boolean): Promise<Learner> {
+  async signIn(id: string, name: string): Promise<Learner> {
     const existing = (await this.learners()).find((l) => l.id === id);
     const learner = existing
-      ? { ...existing, name, teacher }
-      : { id, name, sample: false, teacher, completedAt: null };
+      ? { ...existing, name }
+      : { id, name, sample: false };
     await this.store.put("learner", learner);
     return learner;
   }
@@ -183,36 +182,40 @@ export class Attempts {
     if (!found) throw new Error("Recorded answer not found.");
     return found;
   }
-  async profile(): Promise<Profile> {
-    return profileSchema.parse(
-      (await this.store.getSetting("profile")) ?? "curious",
+  async completion(
+    learnerId: string,
+    assignmentId: string,
+  ): Promise<Completion | null> {
+    return (
+      (await this.list("completion")).find(
+        (c) => c.learnerId === learnerId && c.assignmentId === assignmentId,
+      ) ?? null
     );
-  }
-  async setProfile(profile: Profile): Promise<void> {
-    await this.store.setSetting("profile", profile);
   }
   async create(
     learnerId: string,
-    profile: Profile,
+    assignmentId: string,
     sample: boolean,
     reviewedOpportunity: boolean,
   ): Promise<Attempt> {
     const learner = await this.learner(learnerId);
-    if (
-      sample &&
-      !(await this.learners()).some((l) => l.id === walkthroughId(learnerId))
-    )
+    const assignment = (await this.list("assignment")).find(
+      (a) => a.id === assignmentId,
+    );
+    if (!assignment || assignment.state !== "posted")
+      throw new Error("Assignment not found.");
+    const walkthrough = walkthroughId(learnerId, assignment.courseId);
+    if (sample && !(await this.learners()).some((l) => l.id === walkthrough))
       await this.store.put("learner", {
-        id: walkthroughId(learnerId),
+        id: walkthrough,
         name: `${learner.name.trim().split(/\s+/)[0] || "You"} · walkthrough`,
         sample: true,
-        teacher: false,
-        completedAt: null,
       });
     const attempt: Attempt = {
       id: randomUUID(),
-      learnerId: sample ? walkthroughId(learnerId) : learnerId,
-      profile,
+      learnerId: sample ? walkthrough : learnerId,
+      assignmentId,
+      rubric: rubricOf(assignment),
       sample,
       reviewedOpportunity,
       createdAt: new Date().toISOString(),
@@ -241,6 +244,8 @@ export class Attempts {
       throw new Error(
         "Main explanation already assessed. Start a new attempt to retry.",
       );
+    if (kind !== "main" && !attempt.rubric.followups.some((q) => q.id === kind))
+      throw new Error("This assignment has no such follow-up question.");
     if (
       kind === "followup-2" &&
       !attempt.diagnostics.some((d) => d.questionId === "followup-1")
@@ -318,6 +323,7 @@ export class Attempts {
     await this.store.put("answer", { ...answer, submittedAt: assessment.at });
     const updated = { ...attempt, mainAssessment: assessment };
     await this.store.put("attempt", updated);
+    await this.lockOnFirstSubmission(updated);
     await this.grant(updated, assessment.outcome);
     return updated;
   }
@@ -363,7 +369,12 @@ export class Attempts {
   ): Promise<Attempt> {
     const attempt = await this.get(id);
     if (!attempt.mainAssessment) throw new Error("No assessment to review.");
-    if (new Set(criteria.map((c) => c.id)).size !== 3)
+    const required = attempt.rubric.concepts.map((c) => c.id);
+    if (
+      criteria.length !== required.length ||
+      new Set(criteria.map((c) => c.id)).size !== required.length ||
+      criteria.some((c) => !required.includes(c.id))
+    )
       throw new Error("Review each required concept once.");
     const mainAnswer = attempt.mainAnswerId
       ? await this.answer(attempt.mainAnswerId)
@@ -401,112 +412,50 @@ export class Attempts {
     await this.store.put("attempt", updated);
     return updated;
   }
-  async teacher(): Promise<TeacherData> {
+  async evidence(
+    assignment: Assignment,
+    roster: string[],
+  ): Promise<TeacherData> {
     const [learners, attempts, answers] = await Promise.all([
       this.learners(),
       this.attempts(),
       this.answers(),
     ]);
-    const roster = learners.filter((l) => !l.teacher);
+    const forAssignment = attempts.filter((a) => a.assignmentId === assignment.id),
+      attemptIds = new Set(forAssignment.map((a) => a.id)),
+      seen = new Set([...roster, ...forAssignment.map((a) => a.learnerId)]);
     return {
-      learners: roster,
-      attempts,
-      answers,
-      recap: projectRecap(roster, attempts),
+      learners: learners.filter((l) => seen.has(l.id)),
+      roster,
+      attempts: forAssignment,
+      answers: answers.filter((a) => attemptIds.has(a.attemptId)),
+      recap: projectRecap(
+        assignment,
+        learners.filter((l) => roster.includes(l.id)),
+        forAssignment,
+      ),
     };
+  }
+  private async lockOnFirstSubmission(attempt: Attempt): Promise<void> {
+    if (attempt.sample) return;
+    const assignment = (await this.list("assignment")).find(
+      (a) => a.id === attempt.assignmentId,
+    );
+    if (assignment && !assignment.locked)
+      await this.store.put("assignment", { ...assignment, locked: true });
   }
   private async grant(
     attempt: Attempt,
     outcome: MainAssessment["outcome"],
   ): Promise<void> {
-    const learner = (await this.store.list("learner")).find(
-      (l) => l.id === attempt.learnerId,
-    );
-    if (learner && !learner.completedAt && outcome === "pass")
-      await this.store.put("learner", {
-        ...learner,
-        completedAt: new Date().toISOString(),
+    if (outcome !== "pass") return;
+    const done = await this.completion(attempt.learnerId, attempt.assignmentId);
+    if (!done)
+      await this.store.put("completion", {
+        id: `${attempt.learnerId}:${attempt.assignmentId}`,
+        learnerId: attempt.learnerId,
+        assignmentId: attempt.assignmentId,
+        at: new Date().toISOString(),
       });
-  }
-  private async seedSamples(): Promise<void> {
-    if (await this.store.getSetting("samples")) return;
-    for (const [id, name] of [
-      ["sample-maya", "Maya"],
-      ["sample-noah", "Noah"],
-      ["sample-eli", "Eli"],
-      ["sample-june", "June"],
-    ] as const)
-      await this.store.put("learner", {
-        id,
-        name,
-        sample: true,
-        teacher: false,
-        completedAt: null,
-      });
-    const cases = [
-      {
-        id: "sample-maya",
-        states: ["demonstrated", "missing", "demonstrated"],
-        retry: false,
-      },
-      {
-        id: "sample-noah",
-        states: ["demonstrated", "missing", "missing"],
-        retry: false,
-      },
-      {
-        id: "sample-noah",
-        states: ["demonstrated", "missing", "missing"],
-        retry: true,
-      },
-      {
-        id: "sample-eli",
-        states: ["demonstrated", "missing", "demonstrated"],
-        retry: false,
-      },
-      {
-        id: "sample-eli",
-        states: ["demonstrated", "demonstrated", "demonstrated"],
-        retry: true,
-      },
-    ];
-    for (const [index, item] of cases.entries()) {
-      const createdAt = new Date(
-        Date.now() - (cases.length - index) * 3600000,
-      ).toISOString();
-      const criteria = lesson.concepts.map((c, i) => ({
-        id: c.id,
-        state: z.enum(["demonstrated", "missing"]).parse(item.states[i]),
-        quote: "",
-        reason:
-          "Authored sample class evidence. No real learner or AI assessment.",
-      }));
-      const attempt: Attempt = {
-        id: `00000000-0000-4000-8000-00000000000${index + 1}`,
-        learnerId: item.id,
-        profile: "curious",
-        sample: true,
-        reviewedOpportunity: item.retry,
-        createdAt,
-        finishedAt: createdAt,
-        mainAnswerId: null,
-        mainAssessment: {
-          kind: "main",
-          outcome: deriveOutcome(criteria, false),
-          criteria,
-          majorError: false,
-          summary: "Illustrative sample class evidence only.",
-          provider: "Authored sample classmate",
-          model: "none",
-          at: createdAt,
-        },
-        diagnostics: [],
-        reviews: [],
-        endingVariant: 0,
-      };
-      await this.store.put("attempt", attempt);
-      await this.grant(attempt, deriveOutcome(criteria, false));
-    }
-    await this.store.setSetting("samples", "seeded");
   }
 }

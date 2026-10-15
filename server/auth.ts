@@ -22,7 +22,6 @@ const sessionSchema = z.object({
   sub: z.string(),
   email: z.string(),
   name: z.string(),
-  role: z.enum(["teacher", "student"]),
   exp: z.number(),
 });
 export type Session = z.infer<typeof sessionSchema>;
@@ -110,6 +109,7 @@ const sessionDays = 7;
 export function auth(
   config: AuthConfig,
   onSignIn: (session: Session) => Promise<unknown>,
+  isTeacher: (email: string) => Promise<boolean>,
 ) {
   const cookieOptions = {
     httpOnly: true,
@@ -126,9 +126,6 @@ export function auth(
   ): Promise<void> {
     const session: Session = {
       ...identity,
-      role: config.teachers.has(identity.email.toLowerCase())
-        ? "teacher"
-        : "student",
       exp: Math.floor(Date.now() / 1000) + sessionDays * 86400,
     };
     await onSignIn(session);
@@ -145,15 +142,15 @@ export function auth(
     if (!found) throw new HttpError(401, "Sign in to continue.");
     return found;
   }
-  function teacher(req: express.Request): Session {
+  async function teacher(req: express.Request): Promise<Session> {
     const found = caller(req);
-    if (found.role !== "teacher")
+    if (!(await isTeacher(found.email)))
       throw new HttpError(403, "Only teachers can open the teacher’s desk.");
     return found;
   }
 
   const router = express.Router();
-  router.get("/me", (req, res) => {
+  router.get("/me", async (req, res) => {
     const found = session(req);
     if (!found) {
       const options: SignInOptions = {
@@ -168,7 +165,7 @@ export function auth(
       learnerId: found.sub,
       name: found.name,
       email: found.email,
-      role: found.role,
+      role: (await isTeacher(found.email)) ? "teacher" : "student",
     };
     res.json(me);
   });

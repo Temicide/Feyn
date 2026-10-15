@@ -6,13 +6,12 @@ import {
   replaceWord,
   walkthroughId,
 } from "../server/attempts.js";
-import { MemoryStore } from "../server/store.js";
 import {
   deriveOutcome,
   validateMain,
   validateDiagnostic,
 } from "../server/providers.js";
-import { lesson } from "../server/lesson.js";
+import { assignment, interval, moment, rubric, workspace } from "./support.js";
 import {
   reviewedTranscript,
   type MainAssessment,
@@ -27,7 +26,7 @@ function main(
   state: Criterion["state"] = "demonstrated",
   at = "2026-10-15T12:00:00.000Z",
 ): MainAssessment {
-  const criteria = lesson.concepts.map((c) => ({
+  const criteria = rubric.concepts.map((c) => ({
     id: c.id,
     state,
     quote: state === "missing" ? "" : transcript,
@@ -58,7 +57,7 @@ function diagnostic(
     reason: "Application reasoning",
     observations: [
       {
-        id: "average-instantaneous",
+        id: interval,
         state: outcome === "correct" ? "demonstrated" : "contradicted",
         quote:
           outcome === "incorrect"
@@ -74,16 +73,18 @@ function diagnostic(
 }
 const you = "google:you";
 async function fresh(): Promise<Attempts> {
-  const store = new Attempts(new MemoryStore());
-  await store.signIn(you, "You", false);
+  const { store, courses } = workspace();
+  await store.signIn(you, "You");
+  await courses.join(you, "FEYN01");
   return store;
 }
+const teacher = (store: Attempts) => store.evidence(assignment, [you]);
 async function submitMain(
   store: Attempts,
   state: Criterion["state"] = "demonstrated",
   reviewed = false,
 ) {
-  const attempt = await store.create(you, "curious", false, reviewed);
+  const attempt = await store.create(you, assignment.id, false, reviewed);
   const answer = await store.addAnswer(
     attempt.id,
     "main",
@@ -115,10 +116,10 @@ test("main pass plus wrong required follow-up earns completion without changing 
   );
   assert.equal(result.mainAssessment?.outcome, "pass");
   assert.equal(result.diagnostics[0]?.assessment.outcome, "incorrect");
-  assert.ok((await store.learner(you)).completedAt);
+  assert.ok(await store.completion(you, assignment.id));
   assert.equal((await store.finish(attempt.id)).diagnostics.length, 1);
-  const row = (await store.teacher()).recap.find(
-    (c) => c.id === "average-instantaneous",
+  const row = (await teacher(store)).recap.find(
+    (c) => c.id === interval,
   );
   assert.ok(row?.gaps.includes(you));
   assert.ok(!row?.support.includes(you));
@@ -126,18 +127,18 @@ test("main pass plus wrong required follow-up earns completion without changing 
 test("weaker voluntary retry updates evidence and never revokes completion", async () => {
   const store = await fresh();
   await submitMain(store);
-  const earned = (await store.learner(you)).completedAt;
+  const earned = (await store.completion(you, assignment.id))?.at;
   await submitMain(store, "missing", true);
-  assert.equal((await store.learner(you)).completedAt, earned);
+  assert.equal((await store.completion(you, assignment.id))?.at, earned);
   assert.equal(
     (await store.attempts()).filter((a) => a.learnerId === you).length,
     2,
   );
-  assert.ok((await store.teacher()).recap.every((c) => c.gaps.includes(you)));
+  assert.ok((await teacher(store)).recap.every((c) => c.gaps.includes(you)));
 });
 test("prepared walkthrough cannot complete the real learner or become their class evidence", async () => {
   const store = await fresh();
-  const attempt = await store.create(you, "curious", true, false);
+  const attempt = await store.create(you, assignment.id, true, false);
   const answer = await store.addAnswer(
     attempt.id,
     "main",
@@ -146,15 +147,15 @@ test("prepared walkthrough cannot complete the real learner or become their clas
     null,
   );
   await store.recordMain(answer.id, main(), transcript);
-  assert.equal((await store.learner(you)).completedAt, null);
-  assert.equal((await store.get(attempt.id)).learnerId, walkthroughId(you));
+  assert.equal(await store.completion(you, assignment.id), null);
+  assert.equal((await store.get(attempt.id)).learnerId, walkthroughId(you, assignment.courseId));
   assert.ok(
-    (await store.teacher()).recap.every((c) => c.unassessed.includes(you)),
+    (await teacher(store)).recap.every((c) => c.unassessed.includes(you)),
   );
 });
 test("three ordered word replacements preserve originals, including repeated word position", async () => {
   const store = await fresh();
-  const attempt = await store.create(you, "curious", false, false);
+  const attempt = await store.create(you, assignment.id, false, false);
   let answer = await store.addAnswer(
     attempt.id,
     "main",
@@ -185,7 +186,7 @@ test("three ordered word replacements preserve originals, including repeated wor
 });
 test("provider result requires each criterion once, literal quotes, and derived pass", async () => {
   const assessment = main();
-  assert.equal(validateMain(assessment, transcript).criteria.length, 3);
+  assert.equal(validateMain(assessment, transcript, rubric).criteria.length, 3);
   assert.throws(
     () =>
       validateMain(
@@ -198,6 +199,7 @@ test("provider result requires each criterion once, literal quotes, and derived 
           ],
         },
         transcript,
+        rubric,
       ),
     /each required/,
   );
@@ -212,6 +214,7 @@ test("provider result requires each criterion once, literal quotes, and derived 
           })),
         },
         transcript,
+        rubric,
       ),
     /outside the transcript/,
   );
@@ -224,7 +227,7 @@ test("provider result requires each criterion once, literal quotes, and derived 
 });
 test("late assessment cannot attach to changed words or a replaced recording", async () => {
   const store = await fresh();
-  const a = await store.create(you, "curious", false, false);
+  const a = await store.create(you, assignment.id, false, false);
   const first = await store.addAnswer(
     a.id,
     "main",
@@ -293,15 +296,15 @@ test("class recap uses one latest usable concept observation, including diagnost
     diagnostic("correct"),
     "No, seven is the average over the whole interval.",
   );
-  let row = (await store.teacher()).recap.find(
-    (c) => c.id === "average-instantaneous",
+  let row = (await teacher(store)).recap.find(
+    (c) => c.id === interval,
   );
   assert.deepEqual(
     row?.resolved.filter((id) => id === you),
     [you],
   );
   assert.ok(!row?.gaps.includes(you));
-  const later = await store.create(you, "curious", false, true),
+  const later = await store.create(you, assignment.id, false, true),
     laterAnswer = await store.addAnswer(
       later.id,
       "main",
@@ -314,8 +317,8 @@ test("class recap uses one latest usable concept observation, including diagnost
     main("not-assessable", "2026-10-15T13:00:00.000Z"),
     transcript,
   );
-  row = (await store.teacher()).recap.find(
-    (c) => c.id === "average-instantaneous",
+  row = (await teacher(store)).recap.find(
+    (c) => c.id === interval,
   );
   assert.ok(row?.demonstrated.includes(you));
   const reviewed = await store.review(
@@ -324,8 +327,8 @@ test("class recap uses one latest usable concept observation, including diagnost
     "I listened to the evidence and confirmed the missing distinction.",
     main("missing").criteria,
   );
-  row = (await store.teacher()).recap.find(
-    (c) => c.id === "average-instantaneous",
+  row = (await teacher(store)).recap.find(
+    (c) => c.id === interval,
   );
   assert.equal(reviewed.reviews.length, 1);
   assert.ok(row?.gaps.includes(you));
@@ -343,7 +346,7 @@ test("automatic support flags stay deferred even after repeated main gaps and di
       : a,
   );
   assert.ok(
-    projectRecap(await store.learners(), attempts).every(
+    projectRecap(assignment, await store.learners(), attempts).every(
       (c) => !c.support.includes(you),
     ),
   );
@@ -352,7 +355,7 @@ test("automatic support flags stay deferred even after repeated main gaps and di
     mainAssessment: main("demonstrated", "2026-10-15T14:00:00.000Z"),
   };
   assert.ok(
-    projectRecap(await store.learners(), [first.attempt, resolved]).every(
+    projectRecap(assignment, await store.learners(), [first.attempt, resolved]).every(
       (c) => !c.support.includes(you),
     ),
   );
@@ -401,13 +404,13 @@ test("diagnostic observations reject duplicate conflicting or missing concepts b
   const transcript =
     "Seven is the average. At three seconds the instantaneous speed is six.";
   const first = {
-    id: "average-instantaneous",
+    id: interval,
     state: "demonstrated",
     quote: "Seven is the average.",
     reason: "Correct distinction.",
   };
   const second = {
-    id: "six-at-three",
+    id: moment,
     state: "demonstrated",
     quote: "At three seconds the instantaneous speed is six.",
     reason: "Correct moment.",
@@ -419,7 +422,7 @@ test("diagnostic observations reject duplicate conflicting or missing concepts b
     observations: [first, second],
   };
   assert.equal(
-    validateDiagnostic(raw, transcript, "followup-1").observations.length,
+    validateDiagnostic(raw, transcript, "followup-1", rubric).observations.length,
     2,
   );
   assert.throws(
@@ -431,6 +434,7 @@ test("diagnostic observations reject duplicate conflicting or missing concepts b
         },
         transcript,
         "followup-1",
+        rubric,
       ),
     /did not match/,
   );
@@ -440,6 +444,7 @@ test("diagnostic observations reject duplicate conflicting or missing concepts b
         { ...raw, observations: [first, first] },
         transcript,
         "followup-1",
+        rubric,
       ),
     /did not match/,
   );
@@ -449,7 +454,55 @@ test("diagnostic observations reject duplicate conflicting or missing concepts b
         { ...raw, observations: [first] },
         transcript,
         "followup-1",
+        rubric,
       ),
     /did not match/,
   );
+});
+
+test("the first real submission locks the assignment, and editing after an unlock bumps the revision", async () => {
+  const { store, courses } = workspace();
+  await store.signIn(you, "You");
+  await courses.join(you, "FEYN01");
+  const course = await courses.create("teacher@school.test", "Biology");
+  const draft = await courses.createDraft(course);
+  const form = {
+    title: "Why ice floats",
+    question: "Explain why ice floats.",
+    reference: "Ice is less dense than water.",
+    profile: "curious" as const,
+    dueDate: null,
+    concepts: [{ title: "Density", description: "Mass per volume." }],
+    followups: [{ question: "What if it were denser?", expected: "It sinks.", concepts: [0] }],
+  };
+  await courses.save(draft.id, form);
+  await courses.join(you, course.joinCode);
+  await courses.post(draft.id);
+  const sample = await store.create(you, draft.id, true, false);
+  const prepared = await store.addAnswer(sample.id, "main", "scripted-sample", transcript, null);
+  const densityOnly = (state: Criterion["state"]) => {
+    const criteria = [{ id: "density", state, quote: transcript, reason: "Checked." }];
+    return { ...main(), criteria, outcome: deriveOutcome(criteria, false) };
+  };
+  await store.recordMain(prepared.id, densityOnly("demonstrated"), transcript);
+  assert.equal((await courses.assignment(draft.id)).locked, false, "a walkthrough does not lock");
+
+  const attempt = await store.create(you, draft.id, false, false);
+  const answer = await store.addAnswer(attempt.id, "main", "microphone", transcript, "a.wav");
+  await store.recordMain(answer.id, densityOnly("demonstrated"), transcript);
+  assert.equal((await courses.assignment(draft.id)).locked, true);
+  await assert.rejects(courses.save(draft.id, form), /Unlock/);
+
+  await courses.unlock(draft.id);
+  const saved = await courses.save(draft.id, {
+    ...form,
+    concepts: [{ title: "Density of water", description: "Mass per volume." }],
+    followups: [{ ...form.followups[0]!, concepts: [0] }],
+  });
+  assert.equal(saved.revision, 1);
+  assert.equal(saved.locked, true);
+  assert.deepEqual(saved.concepts.map((c) => c.id), ["density-of-water"]);
+  const frozen = (await store.get(attempt.id)).rubric;
+  assert.equal(frozen.revision, 0);
+  assert.deepEqual(frozen.concepts.map((c) => c.id), ["density"]);
 });

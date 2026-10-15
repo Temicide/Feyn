@@ -7,7 +7,7 @@ const root = new URL('../', import.meta.url);
 const email = process.env.FEYN_TEACHER_EMAIL ?? 'teacher@example.com';
 const signIn = await fetch(`${base}/api/auth/dev?${new URLSearchParams({ email, name: 'Live check' })}`, { redirect: 'manual' });
 const cookie = signIn.headers.getSetCookie().find(c => c.startsWith('feyn_session='))?.split(';')[0];
-assert.ok(cookie, 'Run the server with DEV_LOGIN=1 and TEACHER_EMAILS including FEYN_TEACHER_EMAIL.');
+assert.ok(cookie, 'Run the server with DEV_LOGIN=1 and TEACHER_EMAILS starting with FEYN_TEACHER_EMAIL.');
 async function request(path, options) {
   const headers = { cookie, origin: base, authorization: `Bearer ${process.env.MCP_TOKEN ?? ''}`, ...options?.headers };
   const response = await fetch(base + path, { ...options, headers, signal: AbortSignal.timeout(120000) });
@@ -28,11 +28,11 @@ async function recording(attemptId, kind, name) {
   assert.equal(result.error, null, result.error ?? 'transcription failed');
   return { answer: result.answer, bytes };
 }
-const status = await request('/api/bootstrap');
+const status = await request('/api/assignments/cart-speed/bootstrap');
 assert.equal(status.providers.transcription, true, 'Configure the ElevenLabs server credential first.');
 assert.equal(status.providers.assessment, true, 'Configure the actual assessment gateway first.');
-const realCompletionBefore = status.learner.completedAt;
-const attempt = await request('/api/attempts', post({ profile: 'curious', sample: true, reviewedOpportunity: false }));
+const realCompletionBefore = status.completedAt;
+const attempt = await request('/api/attempts', post({ assignmentId: 'cart-speed', sample: true, reviewedOpportunity: false }));
 const main = await recording(attempt.id, 'main', 'main.wav');
 assert.match(main.answer.originalTranscript, /instantaneous speed is six meters per second/i);
 const original = main.answer.originalTranscript;
@@ -52,16 +52,13 @@ const assessed = await request(`/api/attempts/${attempt.id}/submit`, post({ answ
 assert.equal(assessed.mainAssessment.outcome, 'pass');
 assert.equal(assessed.mainAssessment.provider, status.providers.assessor);
 assert.deepEqual(assessed.mainAssessment.criteria.map(c => c.state), ['demonstrated', 'demonstrated', 'demonstrated']);
-const earned = (await request('/api/teacher')).learners.find(learner => learner.id === attempt.learnerId)?.completedAt;
-assert.equal(typeof earned, 'string');
 const quick = await recording(attempt.id, 'followup-1', 'followup-incorrect.wav');
 const diagnostic = await request(`/api/attempts/${attempt.id}/submit`, post({ answerId: quick.answer.id }));
 assert.equal(diagnostic.diagnostics[0].assessment.outcome, 'incorrect');
 assert.equal(diagnostic.mainAssessment.outcome, 'pass');
 await request(`/api/attempts/${attempt.id}/finish`, post({}));
-assert.equal((await request('/api/teacher')).learners.find(learner => learner.id === attempt.learnerId)?.completedAt, earned);
-assert.equal((await request('/api/bootstrap')).learner.completedAt, realCompletionBefore, 'Synthetic verification must not grant real learner completion.');
-const evidence = await request('/api/teacher');
+assert.equal((await request('/api/assignments/cart-speed/bootstrap')).completedAt, realCompletionBefore, 'Synthetic verification must not grant real learner completion.');
+const evidence = await request('/api/teacher/assignments/cart-speed');
 const saved = evidence.answers.find(a => a.id === main.answer.id);
 assert.equal(saved.originalTranscript, original);
 assert.equal(saved.corrections.length, 1);
@@ -70,7 +67,7 @@ assert.equal(audio.status, 200);
 assert.equal(createHash('sha256').update(Buffer.from(await audio.arrayBuffer())).digest('hex'), createHash('sha256').update(main.bytes).digest('hex'));
 const tools = await request('/mcp', post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }));
 assert.equal(tools.result.tools.some(t => t.name === 'get_assignment'), true);
-const assignment = await request('/mcp', post({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_assignment', arguments: {} } }));
+const assignment = await request('/mcp', post({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_assignment', arguments: { assignmentId: 'cart-speed' } } }));
 assert.equal(JSON.parse(assignment.result.content[0].text).id, 'cart-speed');
 const result = {
   inputSource: 'Synthetic audio fixtures. These are not real classroom learning results.',
@@ -78,7 +75,6 @@ const result = {
   transcription: 'Real ElevenLabs Scribe v2',
   main: assessed.mainAssessment,
   diagnostic: diagnostic.diagnostics[0].assessment,
-  completionPreserved: true,
   originalAudioByteMatch: true,
   correctionHistoryPreserved: true,
   realLearnerCompletionUnchanged: true,
@@ -87,4 +83,4 @@ const result = {
 };
 await mkdir(new URL('.audit/', root), { recursive: true });
 await writeFile(new URL('.audit/live-verification.json', root), JSON.stringify(result, null, 2));
-process.stdout.write(JSON.stringify({ result: 'PASS', attemptId: attempt.id, main: 'pass', followup: 'incorrect', completionPreserved: true, originalAudioByteMatch: true, mcp: 'assignment read verified' }) + '\n');
+process.stdout.write(JSON.stringify({ result: 'PASS', attemptId: attempt.id, main: 'pass', followup: 'incorrect', originalAudioByteMatch: true, mcp: 'assignment read verified' }) + '\n');

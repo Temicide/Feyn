@@ -1,13 +1,62 @@
 import { z } from "zod";
 
-export const conceptIdSchema = z.enum([
-  "distance-speed",
-  "average-instantaneous",
-  "six-at-three",
-]);
+export const conceptIdSchema = z.string().min(1).max(80);
 export type ConceptId = z.infer<typeof conceptIdSchema>;
 export const profileSchema = z.enum(["curious", "playful"]);
 export type Profile = z.infer<typeof profileSchema>;
+const followupIdSchema = z.enum(["followup-1", "followup-2"]);
+const strictText = (max: number) => z.string().trim().min(1).max(max);
+const looseText = (max: number) => z.string().trim().max(max);
+function rubricParts(text: typeof strictText) {
+  return {
+    title: text(120),
+    question: text(2000),
+    reference: text(4000),
+    profile: profileSchema,
+    concepts: z
+      .array(
+        z.object({
+          id: conceptIdSchema,
+          title: text(120),
+          description: text(600),
+        }),
+      )
+      .max(5),
+    followups: z
+      .array(
+        z.object({
+          id: followupIdSchema,
+          question: text(1000),
+          expected: text(1000),
+          conceptIds: z.array(conceptIdSchema),
+        }),
+      )
+      .max(2),
+  };
+}
+const strictParts = rubricParts(strictText);
+export const rubricSchema = z
+  .object({
+    ...strictParts,
+    concepts: strictParts.concepts.min(1),
+    followups: strictParts.followups.min(1),
+    revision: z.number().int().nonnegative(),
+  })
+  .superRefine((rubric, ctx) => {
+    const ids = rubric.concepts.map((c) => c.id);
+    if (new Set(ids).size !== ids.length)
+      ctx.addIssue({ code: "custom", message: "Each concept needs its own title." });
+    rubric.followups.forEach((q, index) => {
+      if (q.id !== `followup-${index + 1}`)
+        ctx.addIssue({ code: "custom", message: "Follow-ups are numbered in order." });
+      if (q.conceptIds.length === 0 || q.conceptIds.some((id) => !ids.includes(id)))
+        ctx.addIssue({
+          code: "custom",
+          message: "Each follow-up must test at least one of this assignment's concepts.",
+        });
+    });
+  });
+export type Rubric = z.infer<typeof rubricSchema>;
 export const criterionSchema = z.object({
   id: conceptIdSchema,
   state: z.enum(["demonstrated", "missing", "contradicted", "not-assessable"]),
@@ -18,7 +67,7 @@ export type Criterion = z.infer<typeof criterionSchema>;
 export const mainAssessmentSchema = z.object({
   kind: z.literal("main"),
   outcome: z.enum(["pass", "needs-work", "not-enough-evidence"]),
-  criteria: z.array(criterionSchema).length(3),
+  criteria: z.array(criterionSchema).min(1).max(5),
   majorError: z.boolean(),
   summary: z.string(),
   provider: z.string(),
@@ -65,14 +114,15 @@ export const reviewSchema = z.object({
   at: z.string(),
   action: z.enum(["accept", "correct"]),
   note: z.string().min(1),
-  criteria: z.array(criterionSchema).length(3),
+  criteria: z.array(criterionSchema).min(1).max(5),
   outcome: z.enum(["pass", "needs-work", "not-enough-evidence"]),
 });
 export type Review = z.infer<typeof reviewSchema>;
 export const attemptSchema = z.object({
   id: z.string().uuid(),
   learnerId: z.string(),
-  profile: profileSchema,
+  assignmentId: z.string(),
+  rubric: rubricSchema,
   sample: z.boolean(),
   reviewedOpportunity: z.boolean(),
   createdAt: z.string(),
@@ -82,7 +132,7 @@ export const attemptSchema = z.object({
   diagnostics: z.array(
     z.object({
       answerId: z.string().uuid(),
-      questionId: z.enum(["followup-1", "followup-2"]),
+      questionId: followupIdSchema,
       assessment: diagnosticAssessmentSchema,
     }),
   ),
@@ -94,68 +144,164 @@ export const learnerSchema = z.object({
   id: z.string(),
   name: z.string(),
   sample: z.boolean(),
-  teacher: z.boolean().default(false),
-  completedAt: z.string().nullable(),
 });
 export type Learner = z.infer<typeof learnerSchema>;
-export const lessonSchema = z.object({
+export const courseSchema = z.object({
   id: z.string(),
   title: z.string(),
-  subject: z.string(),
-  question: z.string(),
-  reference: z.string(),
-  concepts: z.array(
-    z.object({
-      id: conceptIdSchema,
-      title: z.string(),
-      description: z.string(),
-    }),
-  ),
-  followups: z.array(
-    z.object({
-      id: z.enum(["followup-1", "followup-2"]),
-      question: z.string(),
-      expected: z.string(),
-      conceptIds: z.array(conceptIdSchema),
-    }),
-  ),
+  teacherId: z.string(),
+  joinCode: z.string(),
+  createdAt: z.string(),
 });
-export type Lesson = z.infer<typeof lessonSchema>;
+export type Course = z.infer<typeof courseSchema>;
+export const enrollmentSchema = z.object({
+  id: z.string(),
+  courseId: z.string(),
+  learnerId: z.string(),
+  joinedAt: z.string(),
+  endedAt: z.string().nullable(),
+});
+export type Enrollment = z.infer<typeof enrollmentSchema>;
+const draftParts = rubricParts(looseText);
+export const assignmentSchema = z.object({
+  id: z.string(),
+  courseId: z.string(),
+  ...draftParts,
+  state: z.enum(["draft", "posted"]),
+  locked: z.boolean(),
+  dueDate: z.string().nullable(),
+  revision: z.number().int().nonnegative(),
+  createdAt: z.string(),
+});
+export type Assignment = z.infer<typeof assignmentSchema>;
+export const teacherEmailSchema = z.object({
+  id: z.string(),
+  addedBy: z.string(),
+  addedAt: z.string(),
+});
+export type TeacherEmail = z.infer<typeof teacherEmailSchema>;
+export const completionSchema = z.object({
+  id: z.string(),
+  learnerId: z.string(),
+  assignmentId: z.string(),
+  at: z.string(),
+});
+export type Completion = z.infer<typeof completionSchema>;
+
+export const assignmentInputSchema = z.object({
+  title: looseText(120),
+  question: looseText(2000),
+  reference: looseText(4000),
+  profile: profileSchema,
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use a date like 2026-10-30.")
+    .nullable(),
+  concepts: z
+    .array(z.object({ title: looseText(120), description: looseText(600) }))
+    .max(5),
+  followups: z
+    .array(
+      z.object({
+        question: looseText(1000),
+        expected: looseText(1000),
+        concepts: z.array(z.number().int().min(0).max(4)),
+      }),
+    )
+    .max(2),
+});
+export type AssignmentInput = z.infer<typeof assignmentInputSchema>;
+export const rubricDraftSchema = z.object({
+  concepts: assignmentInputSchema.shape.concepts.min(1),
+  followups: assignmentInputSchema.shape.followups.min(1),
+});
+export type RubricDraft = z.infer<typeof rubricDraftSchema>;
+export const draftRequestSchema = z.object({
+  question: strictText(2000),
+  reference: strictText(4000),
+});
+
+const recapRowSchema = z.object({
+  id: conceptIdSchema,
+  title: z.string(),
+  gaps: z.array(z.string()),
+  resolved: z.array(z.string()),
+  demonstrated: z.array(z.string()),
+  unassessed: z.array(z.string()),
+  support: z.array(z.string()),
+});
 export const teacherSchema = z.object({
   learners: z.array(learnerSchema),
+  roster: z.array(z.string()),
   attempts: z.array(attemptSchema),
   answers: z.array(answerSchema),
-  recap: z.array(
-    z.object({
-      id: conceptIdSchema,
-      title: z.string(),
-      gaps: z.array(z.string()),
-      resolved: z.array(z.string()),
-      demonstrated: z.array(z.string()),
-      unassessed: z.array(z.string()),
-      support: z.array(z.string()),
-    }),
-  ),
+  recap: z.array(recapRowSchema),
 });
 export type TeacherData = z.infer<typeof teacherSchema>;
-export const teacherViewSchema = teacherSchema.extend({ ubot: z.boolean() });
+export const teacherViewSchema = teacherSchema.extend({
+  ubot: z.boolean(),
+  assignment: assignmentSchema,
+  course: z.object({ id: z.string(), title: z.string() }),
+});
+export type TeacherView = z.infer<typeof teacherViewSchema>;
 export const recapDraftSchema = z.object({
   text: z.string(),
   provider: z.string(),
   at: z.string(),
 });
+const assignmentCardSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  dueDate: z.string().nullable(),
+  completedAt: z.string().nullable(),
+});
+export const studentCourseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  assignments: z.array(assignmentCardSchema),
+});
+export type StudentCourse = z.infer<typeof studentCourseSchema>;
+export const studentCoursesSchema = z.array(studentCourseSchema);
 export const bootstrapSchema = z.object({
-  lesson: lessonSchema,
+  assignment: assignmentSchema,
+  courseTitle: z.string(),
   learner: learnerSchema,
+  completedAt: z.string().nullable(),
   attempts: z.array(attemptSchema),
   providers: z.object({
     transcription: z.boolean(),
     assessment: z.boolean(),
     assessor: z.string(),
   }),
-  profile: profileSchema,
 });
 export type Bootstrap = z.infer<typeof bootstrapSchema>;
+const teacherAssignmentCardSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  state: z.enum(["draft", "posted"]),
+  locked: z.boolean(),
+  dueDate: z.string().nullable(),
+  enrolled: z.number().int(),
+  completed: z.number().int(),
+  gapConcepts: z.number().int(),
+});
+export const teacherCourseSchema = z.object({
+  course: courseSchema,
+  roster: z.array(
+    z.object({ learnerId: z.string(), name: z.string(), joinedAt: z.string() }),
+  ),
+  assignments: z.array(teacherAssignmentCardSchema),
+});
+export type TeacherCourse = z.infer<typeof teacherCourseSchema>;
+export const teacherCoursesSchema = z.array(
+  z.object({
+    id: z.string(),
+    title: z.string(),
+    joinCode: z.string(),
+    students: z.number().int(),
+    posted: z.number().int(),
+  }),
+);
 export const meSchema = z.object({
   learnerId: z.string(),
   name: z.string(),
@@ -170,7 +316,7 @@ export const signInOptionsSchema = z.object({
 });
 export type SignInOptions = z.infer<typeof signInOptionsSchema>;
 export const createAttemptSchema = z.object({
-  profile: profileSchema,
+  assignmentId: z.string(),
   sample: z.boolean(),
   reviewedOpportunity: z.boolean(),
 });
@@ -186,7 +332,7 @@ export const replacementSchema = z.object({
 export const teacherReviewRequestSchema = z.object({
   action: z.enum(["accept", "correct"]),
   note: z.string().trim().min(1).max(3000),
-  criteria: z.array(criterionSchema).length(3),
+  criteria: z.array(criterionSchema).min(1).max(5),
 });
 export const maxAudioBytes = 4 * 1024 * 1024;
 export const submissionSchema = z.object({ answerId: z.string().uuid() });
@@ -198,11 +344,3 @@ export function reviewedTranscript(answer: Answer): string {
   for (const edit of answer.corrections) tokens[edit.index] = edit.after;
   return tokens.join(" ");
 }
-export const sampleMain =
-  "Distance tells us how far the cart is from the start, while speed tells us how quickly that distance changes. Average speed is the change in distance divided by the elapsed time over an interval. Instantaneous speed is that average over smaller and smaller intervals around one moment. For s of t equals t squared, the derivative is two t. At three seconds it is six meters per second. That means at that exact moment the distance is changing at six meters each second, not that it traveled six meters in the whole second.";
-export const sampleFollowups = {
-  "followup-1":
-    "No. Seven meters per second is the average speed between three and four seconds. The speed changes during that second. At exactly three seconds its instantaneous speed is six meters per second.",
-  "followup-2":
-    "At five seconds the speed is ten meters per second, because the derivative is two t. The speed increases as time increases in this example.",
-};

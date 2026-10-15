@@ -5,9 +5,15 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import { Attempts, belongsTo } from "./attempts.js";
 import { auth, authConfig, HttpError } from "./auth.js";
+import { Courses } from "./courses.js";
+import { prepare } from "./seed.js";
 import { openStore, type RecordStore } from "./store.js";
-import { lesson } from "./lesson.js";
-import { classRecapCounts, draftRecap, ubotConfig } from "./ubot.js";
+import {
+  classRecapCounts,
+  draftRecap,
+  draftRubric,
+  ubotConfig,
+} from "./ubot.js";
 import {
   assessMain,
   assessDiagnostic,
@@ -15,15 +21,16 @@ import {
   transcribe,
 } from "./providers.js";
 import {
+  assignmentInputSchema,
   createAttemptSchema,
+  draftRequestSchema,
   maxAudioBytes,
-  profileSchema,
   replacementSchema,
   teacherReviewRequestSchema,
   submissionSchema,
   reviewedTranscript,
-  sampleMain,
-  sampleFollowups,
+  type Attempt,
+  type TeacherView,
 } from "../shared/contracts.js";
 
 const port = Number(process.env.PORT ?? 4173);
@@ -35,11 +42,22 @@ export function createApp(
   records: RecordStore = openStore(process.env),
   env: NodeJS.ProcessEnv = process.env,
 ): express.Express {
-  const store = new Attempts(records);
   const config = authConfig(env);
   const ubot = ubotConfig(env);
-  const { router, caller, teacher } = auth(config, (session) =>
-    store.signIn(session.sub, session.name, session.role === "teacher"),
+  let preparing: Promise<void> | null = null;
+  const ready = () =>
+    (preparing ??= prepare(records, [...config.teachers]).catch(
+      (error: unknown) => {
+        preparing = null;
+        throw error;
+      },
+    ));
+  const store = new Attempts(records, ready);
+  const courses = new Courses(records, ready);
+  const { router, caller, teacher } = auth(
+    config,
+    (session) => store.signIn(session.sub, session.name),
+    (email) => courses.isTeacher(email),
   );
   const hosts = [...loopback, ...(config.origin ? [config.origin.host] : [])];
   const origins = [
@@ -71,96 +89,235 @@ export function createApp(
   function id(value: unknown): string {
     return z.string().uuid().parse(value);
   }
+  type Access = "write" | "read";
   async function ownAttempt(
     req: express.Request,
     attemptId: unknown,
-    teacherMayRead = false,
-  ) {
+    access: Access = "write",
+  ): Promise<Attempt> {
     const session = caller(req),
       wanted = id(attemptId),
       attempt = (await store.attempts()).find((a) => a.id === wanted);
-    if (
-      !attempt ||
-      !(
-        belongsTo(attempt, session.sub) ||
-        (teacherMayRead && session.role === "teacher")
-      )
-    )
-      throw new HttpError(404, "Attempt not found.");
-    return attempt;
+    if (!attempt) throw new HttpError(404, "Attempt not found.");
+    if (belongsTo(attempt, session.sub)) {
+      if (access === "write")
+        await courses.takeable(
+          { id: session.sub, email: session.email },
+          attempt.assignmentId,
+        );
+      return attempt;
+    }
+    if (access === "read" && (await isTeacherOf(session.email, attempt)))
+      return attempt;
+    throw new HttpError(404, "Attempt not found.");
+  }
+  async function isTeacherOf(email: string, attempt: Attempt): Promise<boolean> {
+    if (!(await courses.isTeacher(email))) return false;
+    return courses
+      .ownedAssignment(email, attempt.assignmentId)
+      .then(() => true, () => false);
   }
   async function ownAnswer(
     req: express.Request,
     answerId: unknown,
-    teacherMayRead = false,
+    access: Access = "write",
   ) {
     caller(req);
     const wanted = id(answerId),
       answer = (await store.answers()).find((a) => a.id === wanted);
     if (!answer) throw new HttpError(404, "Recorded answer not found.");
-    await ownAttempt(req, answer.attemptId, teacherMayRead);
+    await ownAttempt(req, answer.attemptId, access);
     return answer;
   }
-  app.get("/api/bootstrap", async (req, res) => {
+  async function teacherView(
+    assignmentId: string,
+    email: string,
+  ): Promise<TeacherView> {
+    const { assignment, course } = await courses.ownedAssignment(
+      email,
+      assignmentId,
+    );
+    return {
+      ...(await store.evidence(assignment, await courses.rosterIds(course.id))),
+      ubot: Boolean(ubot),
+      assignment,
+      course: { id: course.id, title: course.title },
+    };
+  }
+  const emailBody = z.object({ email: z.string().trim().email() });
+  app.get("/api/courses", async (req, res) => {
+    res.json(await courses.studentCourses(caller(req).sub));
+  });
+  app.post("/api/courses/join", async (req, res) => {
     const session = caller(req);
-    const learner = await store.signIn(session.sub, session.name, session.role === "teacher");
+    await store.signIn(session.sub, session.name);
+    const { code } = z.object({ code: z.string().trim().min(1).max(20) }).parse(req.body);
+    const course = await courses.join(session.sub, code);
+    const joined = (await courses.studentCourses(session.sub)).find(
+      (c) => c.id === course.id,
+    );
+    res.json(joined);
+  });
+  app.post("/api/courses/:id/leave", async (req, res) => {
+    await courses.end(String(req.params.id), caller(req).sub);
+    res.json({});
+  });
+  app.post("/api/courses", async (req, res) => {
+    const session = await teacher(req);
+    const { title } = z
+      .object({ title: z.string().trim().min(1).max(120) })
+      .parse(req.body);
+    res.json(await courses.create(session.email, title));
+  });
+  app.post("/api/teachers", async (req, res) => {
+    const session = await teacher(req);
+    await courses.addTeacher(emailBody.parse(req.body).email, session.email);
+    res.json({});
+  });
+  app.get("/api/teacher/courses", async (req, res) => {
+    const session = await teacher(req);
+    const [mine, assignments] = await Promise.all([
+      courses.taughtBy(session.email),
+      records.list("assignment"),
+    ]);
+    res.json(
+      await Promise.all(
+        mine.map(async (course) => ({
+          id: course.id,
+          title: course.title,
+          joinCode: course.joinCode,
+          students: (await courses.rosterIds(course.id)).length,
+          posted: assignments.filter(
+            (a) => a.courseId === course.id && a.state === "posted",
+          ).length,
+        })),
+      ),
+    );
+  });
+  app.get("/api/teacher/courses/:id", async (req, res) => {
+    const session = await teacher(req);
+    res.json(
+      await courses.teacherCourse(
+        await courses.owned(session.email, String(req.params.id)),
+      ),
+    );
+  });
+  app.post("/api/teacher/courses/:id/code", async (req, res) => {
+    const session = await teacher(req);
+    res.json(
+      await courses.newCode(
+        await courses.owned(session.email, String(req.params.id)),
+      ),
+    );
+  });
+  app.post("/api/teacher/courses/:id/remove", async (req, res) => {
+    const session = await teacher(req);
+    const course = await courses.owned(session.email, String(req.params.id));
+    const { learnerId } = z.object({ learnerId: z.string() }).parse(req.body);
+    await courses.end(course.id, learnerId);
+    res.json({});
+  });
+  app.post("/api/teacher/courses/:id/assignments", async (req, res) => {
+    const session = await teacher(req);
+    res.json(
+      await courses.createDraft(
+        await courses.owned(session.email, String(req.params.id)),
+      ),
+    );
+  });
+  app.get("/api/teacher/assignments/:id", async (req, res) => {
+    const session = await teacher(req);
+    res.json(await teacherView(String(req.params.id), session.email));
+  });
+  app.put("/api/teacher/assignments/:id", async (req, res) => {
+    const session = await teacher(req);
+    const { assignment } = await courses.ownedAssignment(
+      session.email,
+      String(req.params.id),
+    );
+    res.json(
+      await courses.save(assignment.id, assignmentInputSchema.parse(req.body)),
+    );
+  });
+  app.post("/api/teacher/assignments/:id/post", async (req, res) => {
+    const session = await teacher(req);
+    const { assignment } = await courses.ownedAssignment(
+      session.email,
+      String(req.params.id),
+    );
+    res.json(await courses.post(assignment.id));
+  });
+  app.post("/api/teacher/assignments/:id/unlock", async (req, res) => {
+    const session = await teacher(req);
+    const { assignment } = await courses.ownedAssignment(
+      session.email,
+      String(req.params.id),
+    );
+    res.json(await courses.unlock(assignment.id));
+  });
+  app.post("/api/teacher/assignments/:id/draft", async (req, res) => {
+    const session = await teacher(req);
+    await courses.ownedAssignment(session.email, String(req.params.id));
+    if (!ubot) throw new HttpError(404, "U-Bot is not configured on the server.");
+    const { question, reference } = draftRequestSchema.parse(req.body);
+    res.json(await draftRubric(ubot, question, reference));
+  });
+  app.post("/api/teacher/assignments/:id/recap-draft", async (req, res) => {
+    const session = await teacher(req);
+    if (!ubot) throw new HttpError(404, "U-Bot is not configured on the server.");
+    const view = await teacherView(String(req.params.id), session.email);
+    res.json(await draftRecap(ubot, view.assignment.question, classRecapCounts(view)));
+  });
+  app.get("/api/assignments/:id/bootstrap", async (req, res) => {
+    const session = caller(req);
+    const learner = await store.signIn(session.sub, session.name);
+    const { assignment, course } = await courses.takeable(
+      { id: learner.id, email: session.email },
+      String(req.params.id),
+    );
     res.json({
-      lesson,
+      assignment,
+      courseTitle: course.title,
       learner,
-      attempts: (await store.attempts()).filter((a) =>
-        belongsTo(a, learner.id),
+      completedAt: (await store.completion(learner.id, assignment.id))?.at ?? null,
+      attempts: (await store.attempts()).filter(
+        (a) => a.assignmentId === assignment.id && belongsTo(a, learner.id),
       ),
       providers: providerStatus,
-      profile: await store.profile(),
     });
-  });
-  app.get("/api/teacher", async (req, res) => {
-    teacher(req);
-    res.json({ ...(await store.teacher()), ubot: Boolean(ubot) });
-  });
-  app.post("/api/teacher/recap-draft", async (req, res) => {
-    teacher(req);
-    if (!ubot) throw new HttpError(404, "U-Bot is not configured on the server.");
-    res.json(
-      await draftRecap(ubot, lesson.question, classRecapCounts(await store.teacher())),
-    );
-  });
-  app.put("/api/profile", async (req, res) => {
-    teacher(req);
-    const profile = profileSchema.parse(
-      z.object({ profile: profileSchema }).parse(req.body).profile,
-    );
-    await store.setProfile(profile);
-    res.json({ profile });
   });
   app.post("/api/attempts", async (req, res) => {
     const session = caller(req);
     const input = createAttemptSchema.parse(req.body);
+    await store.signIn(session.sub, session.name);
+    await courses.takeable(
+      { id: session.sub, email: session.email },
+      input.assignmentId,
+    );
     res.json(
       await store.create(
         session.sub,
-        input.profile,
+        input.assignmentId,
         input.sample,
         input.reviewedOpportunity,
       ),
     );
   });
   app.get("/api/attempts/:id", async (req, res) =>
-    res.json(await ownAttempt(req, req.params.id, true)),
+    res.json(await ownAttempt(req, req.params.id, "read")),
   );
   app.post("/api/attempts/:id/sample", async (req, res) => {
     const attempt = await ownAttempt(req, req.params.id);
     const kind = answerKind.parse(
       z.object({ kind: answerKind }).parse(req.body).kind,
     );
+    const prepared =
+      kind === "main"
+        ? attempt.rubric.reference
+        : attempt.rubric.followups.find((q) => q.id === kind)?.expected;
+    if (!prepared) throw new Error("This assignment has no such follow-up question.");
     res.json(
-      await store.addAnswer(
-        attempt.id,
-        kind,
-        "scripted-sample",
-        kind === "main" ? sampleMain : sampleFollowups[kind],
-        null,
-      ),
+      await store.addAnswer(attempt.id, kind, "scripted-sample", prepared, null),
     );
   });
   app.post(
@@ -229,7 +386,7 @@ export function createApp(
     res.json(await store.correct(answer.id, input.index, input.replacement));
   });
   app.get("/api/answers/:id/audio", async (req, res) => {
-    const answer = await ownAnswer(req, req.params.id, true);
+    const answer = await ownAnswer(req, req.params.id, "read");
     const audio = answer.audioId
       ? await records.getAudio(answer.audioId)
       : null;
@@ -265,7 +422,7 @@ export function createApp(
       res.json(
         await store.recordMain(
           answer.id,
-          await assessMain(transcript, scripted),
+          await assessMain(transcript, scripted, attempt.rubric),
           transcript,
         ),
       );
@@ -273,7 +430,7 @@ export function createApp(
       res.json(
         await store.recordDiagnostic(
           answer.id,
-          await assessDiagnostic(transcript, answer.kind, scripted),
+          await assessDiagnostic(transcript, answer.kind, scripted, attempt.rubric),
           transcript,
         ),
       );
@@ -282,11 +439,14 @@ export function createApp(
     res.json(await store.finish((await ownAttempt(req, req.params.id)).id)),
   );
   app.post("/api/attempts/:id/review", async (req, res) => {
-    teacher(req);
+    const session = await teacher(req);
     const input = teacherReviewRequestSchema.parse(req.body);
+    const attempt = await ownAttempt(req, req.params.id, "read");
+    if (!(await isTeacherOf(session.email, attempt)))
+      throw new HttpError(404, "Attempt not found.");
     res.json(
       await store.review(
-        id(req.params.id),
+        attempt.id,
         input.action,
         input.note,
         input.criteria,
@@ -300,35 +460,98 @@ export function createApp(
     method: z.string(),
     params: z.record(z.string(), z.unknown()).optional(),
   });
-  const noArguments = {
+  const idProperty = (name: string) => ({
     type: "object",
-    properties: {},
+    properties: { [name]: { type: "string" } },
+    required: [name],
     additionalProperties: false,
-  };
+  });
+  const assignmentArgs = z.object({ assignmentId: z.string() });
+  async function adminEvidence(assignmentId: string) {
+    const assignment = await courses.assignment(assignmentId);
+    return store.evidence(assignment, await courses.rosterIds(assignment.courseId));
+  }
   const mcpTools = new Map<
     string,
-    { description: string; read: () => Promise<unknown> }
+    {
+      description: string;
+      inputSchema: unknown;
+      read: (args: unknown) => Promise<unknown>;
+    }
   >(
     Object.entries({
+      list_courses: {
+        description:
+          "List every course with its teacher, enrolled student count and assignments.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        read: async () => {
+          const [all, assignments] = await Promise.all([
+            records.list("course"),
+            records.list("assignment"),
+          ]);
+          return Promise.all(
+            all.map(async (course) => ({
+              id: course.id,
+              title: course.title,
+              teacher: course.teacherId,
+              students: (await courses.rosterIds(course.id)).length,
+              assignments: assignments
+                .filter((a) => a.courseId === course.id)
+                .map((a) => ({ id: a.id, title: a.title, state: a.state })),
+            })),
+          );
+        },
+      },
       get_assignment: {
         description:
-          "Read the canonical lesson, essential concepts, and diagnostic questions.",
-        read: async () => lesson,
+          "Read one assignment: its question, reference answer, essential concepts and follow-up questions.",
+        inputSchema: idProperty("assignmentId"),
+        read: async (args: unknown) =>
+          courses.assignment(assignmentArgs.parse(args).assignmentId),
       },
       get_class_recap: {
         description:
-          "Read per-concept counts of current gaps, resolved gaps, demonstrated and unassessed learners. Contains no learner names. Counts include labeled sample learners.",
-        read: async () => classRecapCounts(await store.teacher()),
+          "Read per-concept counts of current gaps, resolved gaps, demonstrated and unassessed learners for one assignment. Contains no learner names. Counts include labeled sample learners.",
+        inputSchema: idProperty("assignmentId"),
+        read: async (args: unknown) =>
+          classRecapCounts(await adminEvidence(assignmentArgs.parse(args).assignmentId)),
       },
       list_attempts: {
         description:
-          "Read preserved main and diagnostic assessments. Sample evidence is labeled.",
-        read: () => store.attempts(),
+          "Read preserved main and diagnostic assessments for one course or one assignment. Sample evidence is labeled.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            courseId: { type: "string" },
+            assignmentId: { type: "string" },
+          },
+          additionalProperties: false,
+        },
+        read: async (args: unknown) => {
+          const input = z
+            .object({ courseId: z.string().optional(), assignmentId: z.string().optional() })
+            .refine((v) => Boolean(v.courseId) !== Boolean(v.assignmentId), {
+              message: "Give exactly one of courseId or assignmentId.",
+            })
+            .parse(args);
+          const [attempts, assignments] = await Promise.all([
+            store.attempts(),
+            records.list("assignment"),
+          ]);
+          return attempts.filter((a) =>
+            input.assignmentId
+              ? a.assignmentId === input.assignmentId
+              : assignments.find((x) => x.id === a.assignmentId)?.courseId ===
+                input.courseId,
+          );
+        },
       },
       get_teacher_evidence: {
         description:
-          "Read original transcripts, corrections, review audit, unique-learner concept recap, and support queue.",
-        read: () => store.teacher(),
+          "Read one assignment's original transcripts, corrections, review audit, unique-learner concept recap and enrolled roster.",
+        inputSchema: idProperty("assignmentId"),
+        read: async (args: unknown) =>
+          adminEvidence(assignmentArgs.parse(args).assignmentId),
       },
     }),
   );
@@ -367,7 +590,7 @@ export function createApp(
           tools: [...mcpTools].map(([name, tool]) => ({
             name,
             description: tool.description,
-            inputSchema: noArguments,
+            inputSchema: tool.inputSchema,
           })),
         };
         break;
@@ -375,7 +598,7 @@ export function createApp(
         const call = z
           .object({
             name: z.string(),
-            arguments: z.object({}).optional(),
+            arguments: z.record(z.string(), z.unknown()).optional(),
           })
           .parse(message.params);
         const tool = mcpTools.get(call.name);
@@ -387,7 +610,7 @@ export function createApp(
           });
           return;
         }
-        const data = await tool.read();
+        const data = await tool.read(call.arguments ?? {});
         result = { content: [{ type: "text", text: JSON.stringify(data) }] };
         break;
       }

@@ -8,10 +8,14 @@ import { z } from "zod";
 import { createApp } from "../server/main.js";
 import { MemoryStore } from "../server/store.js";
 import {
+  assignmentSchema,
   attemptSchema,
   bootstrapSchema,
+  courseSchema,
   meSchema,
-  teacherSchema,
+  studentCoursesSchema,
+  teacherCourseSchema,
+  teacherViewSchema,
 } from "../shared/contracts.js";
 
 const env = {
@@ -98,6 +102,16 @@ function json(cookie: string, method: string, body: unknown) {
   };
 }
 
+const attemptBody = {
+  assignmentId: "cart-speed",
+  sample: false,
+  reviewedOpportunity: false,
+};
+const desk = "/api/teacher/assignments/cart-speed";
+async function enroll(cookie: string, code = "FEYN01") {
+  return call("/api/courses/join", json(cookie, "POST", { code }));
+}
+
 test("rebinding hosts, foreign origins, and origin-less writes are rejected", async () => {
   for (const host of [
     "review-attacker.invalid:4173",
@@ -111,11 +125,8 @@ test("rebinding hosts, foreign origins, and origin-less writes are rejected", as
     403,
   );
   const cookie = await signIn("maya@school.test", "Maya Student");
-  const create = json(cookie, "POST", {
-    profile: "curious",
-    sample: false,
-    reviewedOpportunity: false,
-  });
+  assert.equal((await enroll(cookie)).status, 200);
+  const create = json(cookie, "POST", attemptBody);
   const { origin: _, ...noOrigin } = create.headers;
   assert.equal(
     (await call("/api/attempts", { ...create, headers: noOrigin })).status,
@@ -135,51 +146,56 @@ test("signed-out visitors get 401 and the sign-in options", async () => {
     z.object({ google: z.boolean(), devLogin: z.boolean() }).parse(me.body),
     { google: true, devLogin: true },
   );
-  for (const path of ["/api/bootstrap", "/api/teacher"])
+  for (const path of ["/api/courses", "/api/teacher/courses"])
     assert.equal((await call(path)).status, 401);
 });
 
-test("only teachers named in TEACHER_EMAILS open the teacher's desk", async () => {
+test("the teacher list lives in the database and is checked on every request", async () => {
   const student = await signIn("noah@school.test", "Noah");
   const teacher = await signIn("teacher@school.test", "Ms Rivera");
   assert.equal(
-    (await call("/api/teacher", { headers: { cookie: student } })).status,
+    (await call("/api/teacher/courses", { headers: { cookie: student } })).status,
     403,
   );
   assert.equal(
-    (await call("/api/profile", json(student, "PUT", { profile: "playful" })))
-      .status,
+    (await call("/api/courses", json(student, "POST", { title: "Mine" }))).status,
     403,
   );
-  const desk = await call("/api/teacher", { headers: { cookie: teacher } });
-  assert.equal(desk.status, 200);
+  const view = teacherViewSchema.parse(
+    (await call(desk, { headers: { cookie: teacher } })).body,
+  );
   for (const name of ["Maya", "Noah", "Eli", "June"])
     assert.ok(
-      teacherSchema.parse(desk.body).learners.some((l) => l.name === name),
+      name === "Noah" || view.learners.some((l) => l.name === name),
+      `${name} is on the demo roster`,
     );
   assert.equal(
-    meSchema.parse(
-      (await call("/api/me", { headers: { cookie: teacher } })).body,
-    ).role,
+    meSchema.parse((await call("/api/me", { headers: { cookie: teacher } })).body).role,
     "teacher",
   );
+  const promoted = await signIn("new.teacher@school.test", "Mx New");
+  const role = async () =>
+    meSchema.parse((await call("/api/me", { headers: { cookie: promoted } })).body).role;
+  assert.equal(await role(), "student");
+  assert.equal(
+    (await call("/api/teachers", json(student, "POST", { email: "new.teacher@school.test" }))).status,
+    403,
+  );
+  assert.equal(
+    (await call("/api/teachers", json(teacher, "POST", { email: "New.Teacher@school.test" }))).status,
+    200,
+  );
+  assert.equal(await role(), "teacher");
 });
 
 test("a student cannot read or change another learner's attempt or audio", async () => {
   const owner = await signIn("eli@school.test", "Eli Owner");
   const other = await signIn("june@school.test", "June Other");
-  const teacher = await signIn("other@school.test", "Mr Okafor");
+  const teacher = await signIn("teacher@school.test", "Ms Rivera");
+  const stranger = await signIn("other@school.test", "Mr Okafor");
+  await enroll(owner);
   const attempt = attemptSchema.parse(
-    (
-      await call(
-        "/api/attempts",
-        json(owner, "POST", {
-          profile: "curious",
-          sample: false,
-          reviewedOpportunity: false,
-        }),
-      )
-    ).body,
+    (await call("/api/attempts", json(owner, "POST", attemptBody))).body,
   );
   const form = new FormData();
   const bytes = Buffer.from("RIFF original recording");
@@ -235,10 +251,18 @@ test("a student cannot read or change another learner's attempt or audio", async
     ).status,
     404,
   );
+  const bootstrapPath = "/api/assignments/cart-speed/bootstrap";
+  assert.equal(
+    (await call(bootstrapPath, { headers: { cookie: other } })).status,
+    404,
+    "bootstrap needs an enrollment",
+  );
+  await enroll(other);
   const otherBootstrap = bootstrapSchema.parse(
-    (await call("/api/bootstrap", { headers: { cookie: other } })).body,
+    (await call(bootstrapPath, { headers: { cookie: other } })).body,
   );
   assert.equal(otherBootstrap.attempts.length, 0);
+  assert.equal(otherBootstrap.assignment.id, "cart-speed");
 
   for (const reader of [owner, teacher]) {
     const audio = await call(`/api/answers/${answerId}/audio`, {
@@ -255,6 +279,13 @@ test("a student cannot read or change another learner's attempt or audio", async
     ).status,
     200,
   );
+  for (const path of [`/api/attempts/${attempt.id}`, `/api/answers/${answerId}/audio`])
+    assert.equal(
+      (await call(path, { headers: { cookie: stranger } })).status,
+      404,
+      "a teacher of another course cannot read this evidence",
+    );
+  assert.equal((await call(desk, { headers: { cookie: stranger } })).status, 404);
 });
 
 test("a tampered session cookie is rejected", async () => {
@@ -263,7 +294,7 @@ test("a tampered session cookie is rejected", async () => {
   const [body, signature] = (token ?? "").split(".");
   const claims = JSON.parse(Buffer.from(body ?? "", "base64url").toString());
   const forged = Buffer.from(
-    JSON.stringify({ ...claims, role: "teacher" }),
+    JSON.stringify({ ...claims, email: "teacher@school.test" }),
   ).toString("base64url");
   for (const bad of [
     `${name}=${forged}.${signature}`,
@@ -274,7 +305,7 @@ test("a tampered session cookie is rejected", async () => {
       401,
     );
     assert.equal(
-      (await call("/api/teacher", { headers: { cookie: bad } })).status,
+      (await call("/api/teacher/courses", { headers: { cookie: bad } })).status,
       401,
     );
   }
@@ -361,19 +392,14 @@ test("Google callback verifies the ID token, creates a learner, and starts a ses
       role: "student",
     },
   );
+  await enroll(cookie);
   const teacher = await signIn("teacher@school.test", "Ms Rivera");
-  const desk = teacherSchema.parse(
-    (await call("/api/teacher", { headers: { cookie: teacher } })).body,
+  const roster = teacherViewSchema.parse(
+    (await call(desk, { headers: { cookie: teacher } })).body,
   );
   assert.deepEqual(
-    desk.learners.find((l) => l.id === "google:google-sub-1234"),
-    {
-      id: "google:google-sub-1234",
-      name: "Ada Lovelace",
-      sample: false,
-      teacher: false,
-      completedAt: null,
-    },
+    roster.learners.find((l) => l.id === "google:google-sub-1234"),
+    { id: "google:google-sub-1234", name: "Ada Lovelace", sample: false },
   );
 
   const rejected = [
@@ -446,6 +472,7 @@ test("MCP tools answer only to the configured bearer token", async () => {
       .parse(mcp.body)
       .result.tools.map((tool) => tool.name),
     [
+      "list_courses",
       "get_assignment",
       "get_class_recap",
       "list_attempts",
@@ -459,7 +486,7 @@ test("MCP tools answer only to the configured bearer token", async () => {
       jsonrpc: "2.0",
       id: 2,
       method: "tools/call",
-      params: { name: "get_class_recap", arguments: {} },
+      params: { name: "get_class_recap", arguments: { assignmentId: "cart-speed" } },
     }),
   });
   const text =
@@ -506,17 +533,9 @@ test("without MCP_TOKEN the MCP endpoint does not exist", async () => {
 
 test("recordings over 4 MB are refused with a named limit", async () => {
   const cookie = await signIn("long@school.test", "Long Talker");
+  await enroll(cookie);
   const attempt = attemptSchema.parse(
-    (
-      await call(
-        "/api/attempts",
-        json(cookie, "POST", {
-          profile: "curious",
-          sample: false,
-          reviewedOpportunity: false,
-        }),
-      )
-    ).body,
+    (await call("/api/attempts", json(cookie, "POST", attemptBody))).body,
   );
   const form = new FormData();
   form.set(
@@ -545,4 +564,157 @@ test("recordings over 4 MB are refused with a named limit", async () => {
     z.object({ error: z.string() }).parse(response.body).error,
     /limited to 4 MB/,
   );
+});
+
+test("a student joins with a code, leaves, and gets their history back on rejoining", async () => {
+  const cookie = await signIn("rejoin@school.test", "Rae Joiner");
+  const courses = async () =>
+    studentCoursesSchema.parse((await call("/api/courses", { headers: { cookie } })).body);
+  assert.deepEqual(await courses(), []);
+  const unknown = await enroll(cookie, "NOPE99");
+  assert.equal(unknown.status, 404);
+  assert.match(z.object({ error: z.string() }).parse(unknown.body).error, /join code/);
+
+  assert.equal((await enroll(cookie, " feyn01 ")).status, 200);
+  const [course] = await courses();
+  assert.equal(course?.title, "Calculus 1 · Rates of change");
+  assert.deepEqual(course?.assignments.map((a) => [a.id, a.completedAt]), [["cart-speed", null]]);
+
+  const attempt = attemptSchema.parse(
+    (await call("/api/attempts", json(cookie, "POST", { ...attemptBody, sample: true }))).body,
+  );
+  assert.equal(attempt.rubric.concepts.length, 3);
+  assert.equal(attempt.learnerId, "walkthrough:dev:rejoin@school.test:demo-calculus-1");
+
+  assert.equal((await call(`/api/courses/demo-calculus-1/leave`, json(cookie, "POST", {}))).status, 200);
+  assert.deepEqual(await courses(), []);
+  assert.equal(
+    (await call("/api/assignments/cart-speed/bootstrap", { headers: { cookie } })).status,
+    404,
+  );
+  assert.equal(
+    (await call("/api/attempts", json(cookie, "POST", attemptBody))).status,
+    404,
+    "a student who left cannot start attempts",
+  );
+
+  await enroll(cookie);
+  const restored = bootstrapSchema.parse(
+    (await call("/api/assignments/cart-speed/bootstrap", { headers: { cookie } })).body,
+  );
+  assert.deepEqual(restored.attempts.map((a) => a.id), [attempt.id]);
+});
+
+test("each teacher sees only their own course, and a removed student leaves the recap but not the evidence", async () => {
+  const ada = await signIn("teacher@school.test", "Ms Rivera");
+  const bo = await signIn("other@school.test", "Mr Okafor");
+  const created = courseSchema.parse(
+    (await call("/api/courses", json(bo, "POST", { title: "Biology 1" }))).body,
+  );
+  assert.match(created.joinCode, /^[A-HJKMNP-Z2-9]{6}$/);
+  assert.equal(created.teacherId, "other@school.test");
+  const mine = async (cookie: string) =>
+    z.array(z.object({ id: z.string() })).parse(
+      (await call("/api/teacher/courses", { headers: { cookie } })).body,
+    ).map((c) => c.id);
+  assert.deepEqual(await mine(bo), [created.id]);
+  assert.deepEqual(await mine(ada), ["demo-calculus-1"]);
+  const path = `/api/teacher/courses/${created.id}`;
+  assert.equal((await call(path, { headers: { cookie: ada } })).status, 404);
+  assert.equal((await call(`${path}/code`, json(ada, "POST", {}))).status, 404);
+
+  const draft = assignmentSchema.parse(
+    (await call(`${path}/assignments`, json(bo, "POST", {}))).body,
+  );
+  assert.equal(
+    (await call(`/api/teacher/assignments/${draft.id}`, { headers: { cookie: ada } })).status,
+    404,
+  );
+  const incomplete = await call(`/api/teacher/assignments/${draft.id}/post`, json(bo, "POST", {}));
+  assert.equal(incomplete.status, 400);
+
+  const student = await signIn("bio@school.test", "Bea Student");
+  assert.equal((await enroll(student, created.joinCode)).status, 200);
+  assert.equal((await enroll(student, "FEYN01")).status, 200);
+
+  const rotated = courseSchema.parse(
+    (await call(`${path}/code`, json(bo, "POST", {}))).body,
+  );
+  assert.notEqual(rotated.joinCode, created.joinCode);
+  const late = await signIn("late@school.test", "Lou Late");
+  assert.equal((await enroll(late, created.joinCode)).status, 404, "the old code stops working");
+
+  const attempt = attemptSchema.parse(
+    (await call("/api/attempts", json(student, "POST", { ...attemptBody, sample: false }))).body,
+  );
+  const before = teacherCourseSchema.parse(
+    (await call(`/api/teacher/courses/demo-calculus-1`, { headers: { cookie: ada } })).body,
+  );
+  assert.ok(before.roster.some((r) => r.name === "Bea Student"));
+  const remove = await call(
+    "/api/teacher/courses/demo-calculus-1/remove",
+    json(ada, "POST", { learnerId: "dev:bio@school.test" }),
+  );
+  assert.equal(remove.status, 200);
+  const view = teacherViewSchema.parse((await call(desk, { headers: { cookie: ada } })).body);
+  assert.ok(!view.roster.includes("dev:bio@school.test"));
+  assert.ok(view.recap.every((row) => !row.unassessed.includes("dev:bio@school.test")));
+  assert.ok(view.attempts.some((a) => a.id === attempt.id), "their attempt stays visible");
+});
+
+test("a teacher writes an assignment by hand, posts it, and a student sees its rubric", async () => {
+  const teacher = await signIn("other@school.test", "Mr Okafor");
+  const course = courseSchema.parse(
+    (await call("/api/courses", json(teacher, "POST", { title: "Chemistry" }))).body,
+  );
+  const draft = assignmentSchema.parse(
+    (await call(`/api/teacher/courses/${course.id}/assignments`, json(teacher, "POST", {}))).body,
+  );
+  const student = await signIn("chem@school.test", "Cy Student");
+  await enroll(student, course.joinCode);
+  assert.equal(
+    (await call(`/api/assignments/${draft.id}/bootstrap`, { headers: { cookie: student } })).status,
+    404,
+    "students never see a draft",
+  );
+  const form = {
+    title: "Why ice floats",
+    question: "Explain why ice floats on water.",
+    reference: "Ice is less dense than liquid water.",
+    profile: "playful",
+    dueDate: "2026-11-02",
+    concepts: [
+      { title: "Density", description: "Mass per volume decides floating." },
+      { title: "Hydrogen bonds", description: "Bonds hold ice in an open lattice." },
+    ],
+    followups: [
+      { question: "What if ice were denser?", expected: "It would sink.", concepts: [0] },
+    ],
+  };
+  const save = (body: unknown) =>
+    call(`/api/teacher/assignments/${draft.id}`, json(teacher, "PUT", body));
+  assert.equal(
+    (await save({ ...form, followups: [{ ...form.followups[0], concepts: [4] }] })).status,
+    400,
+  );
+  const saved = assignmentSchema.parse((await save(form)).body);
+  assert.deepEqual(saved.concepts.map((c) => c.id), ["density", "hydrogen-bonds"]);
+  assert.deepEqual(saved.followups[0]?.conceptIds, ["density"]);
+  const posted = assignmentSchema.parse(
+    (await call(`/api/teacher/assignments/${draft.id}/post`, json(teacher, "POST", {}))).body,
+  );
+  assert.equal(posted.state, "posted");
+
+  const boot = bootstrapSchema.parse(
+    (await call(`/api/assignments/${draft.id}/bootstrap`, { headers: { cookie: student } })).body,
+  );
+  assert.equal(boot.assignment.dueDate, "2026-11-02");
+  const attempt = attemptSchema.parse(
+    (await call("/api/attempts", json(student, "POST", { assignmentId: draft.id, sample: false, reviewedOpportunity: false }))).body,
+  );
+  assert.deepEqual(attempt.rubric.concepts.map((c) => c.title), ["Density", "Hydrogen bonds"]);
+  assert.equal(attempt.rubric.profile, "playful");
+
+  const sample = await call(`/api/attempts/${attempt.id}/sample`, json(student, "POST", { kind: "followup-2" }));
+  assert.equal(sample.status, 400, "this assignment has only one follow-up");
 });
