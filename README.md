@@ -1,4 +1,6 @@
-# Feyn
+<p align="center">
+  <img src="public/brand/feyn-logo.png" alt="Feyn" width="200">
+</p>
 
 Feyn lets a student explain an idea aloud to Pip, then lets a teacher inspect the recording and assessment. Teachers run courses, students join them with a code, and a teacher posts assignments by hand or with a U-Bot draft. The classroom and all character art are original.
 
