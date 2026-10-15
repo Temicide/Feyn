@@ -434,6 +434,26 @@ details > div {
   flex: 1;
   min-height: 76px;
 }
+.pip-says .pixel-avatar {
+  transition: transform 0.15s;
+}
+.pip-says:hover .pixel-avatar {
+  transform: translateY(-2px);
+}
+.pip-voice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin-top: -8px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.pip-voice .sound-button {
+  min-height: 32px;
+  padding: 4px 12px;
+}
 .dev-login {
   width: 100%;
   display: grid;

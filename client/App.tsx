@@ -14,6 +14,7 @@ import { href, useRoute, type Route } from "./route.js";
 import { Teacher } from "./Teacher.js";
 import { DeskHome, TeacherCoursePage } from "./TeacherCourses.js";
 import { Typed } from "./Typed.js";
+import { pipVoice, useSound } from "./voice.js";
 
 type Session =
   | { kind: "checking" }
@@ -21,7 +22,9 @@ type Session =
   | { kind: "signed-in"; me: Me };
 export function App() {
   const [session, setSession] = useState<Session>({ kind: "checking" }),
-    [failure, setFailure] = useState("");
+    [failure, setFailure] = useState(""),
+    [greeting, setGreeting] = useState(0),
+    [sound, setSound] = useSound();
   async function check() {
     const response = await fetch("/api/me");
     const raw: unknown = await response.json();
@@ -51,11 +54,30 @@ export function App() {
       <div className="signin-card">
         <img className="signin-logo" src="/brand/feyn-logo.png" alt="Feyn" />
         <p className="signin-tagline">Learn an idea by teaching it to Pip.</p>
-        <div className="pip-says">
+        <button
+          type="button"
+          className="pip-says"
+          aria-describedby="pip-hint"
+          onClick={() => setGreeting(greeting + 1)}
+        >
           <img className="pixel-avatar" src="/art/child-listening.png" alt="" />
-          <p className="bubble">
-            <Typed text="Hi, I'm Pip! Will you teach me something today? Sign in so I remember what you taught me." />
-          </p>
+          <span className="bubble">
+            <Typed
+              key={greeting}
+              text="Hi, I'm Pip! Will you teach me something today? Sign in so I remember what you taught me."
+              voice={pipVoice}
+            />
+          </span>
+        </button>
+        <div className="pip-voice">
+          <span id="pip-hint">Tap Pip to hear Pip talk.</span>
+          <button
+            className="sound-button"
+            aria-pressed={sound}
+            onClick={() => setSound(!sound)}
+          >
+            {sound ? "Sound on" : "Sound off"}
+          </button>
         </div>
         {session.kind === "checking" ? (
           <span className="thinking-dots" role="status">

@@ -5,12 +5,15 @@ import {
   type Attempt,
 } from "../shared/contracts.js";
 import { Recorder } from "./Recorder.js";
+import {
+  useSound,
+  useTypewriter,
+  voiceFor,
+  type Expression,
+  type Speaker,
+} from "./voice.js";
 
-type Line = {
-  speaker: "You" | "Pip";
-  text: string;
-  expression: "listening" | "puzzled" | "aha" | "thinking";
-};
+type Line = { speaker: Speaker; text: string; expression: Expression };
 type SceneStage =
   | { kind: "intro"; index: number }
   | { kind: "question"; number: 1 | 2 }
@@ -105,8 +108,7 @@ export function Scene({
 }) {
   const [roomArt, setRoomArt] = useState<string | null>(null);
   const [stage, setStage] = useState<SceneStage>({ kind: "intro", index: 0 }),
-    [visible, setVisible] = useState(0),
-    [muted, setMuted] = useState(true),
+    [sound, setSound] = useSound(),
     [recordBusy, setRecordBusy] = useState(false),
     [finishError, setFinishError] = useState("");
   useEffect(() => {
@@ -124,8 +126,7 @@ export function Scene({
       active = false;
     };
   }, []);
-  const context = useRef<AudioContext | null>(null),
-    prevDiagnosticCount = useRef(attempt.diagnostics.length);
+  const prevDiagnosticCount = useRef(attempt.diagnostics.length);
   const busy = useCallback((value: boolean) => setRecordBusy(value), []);
   useEffect(() => {
     if (attempt.diagnostics.length > prevDiagnosticCount.current) {
@@ -200,55 +201,23 @@ export function Scene({
       break;
   }
   const text = processing || recordBusy ? "•••" : line.text;
-  useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setVisible(text.length);
-      return;
-    }
-    setVisible(0);
-    const interval = setInterval(
-      () => setVisible((value) => Math.min(value + 1, text.length)),
-      23,
-    );
-    return () => clearInterval(interval);
-  }, [text]);
-  useEffect(() => {
-    if (
-      muted ||
-      recordBusy ||
-      processing ||
-      visible === 0 ||
-      visible >= text.length ||
-      visible % 3 !== 0
-    )
-      return;
-    try {
-      context.current ??= new AudioContext();
-      const oscillator = context.current.createOscillator(),
-        gain = context.current.createGain();
-      oscillator.type = "square";
-      oscillator.frequency.value = line.speaker === "Pip" ? 360 : 250;
-      gain.gain.setValueAtTime(0.012, context.current.currentTime);
-      gain.gain.exponentialRampToValueAtTime(
-        0.001,
-        context.current.currentTime + 0.035,
-      );
-      oscillator.connect(gain);
-      gain.connect(context.current.destination);
-      oscillator.start();
-      oscillator.stop(context.current.currentTime + 0.04);
-    } catch {}
-  }, [visible, muted, recordBusy, processing, text.length, line.speaker]);
-  useEffect(
-    () => () => {
-      void context.current?.close();
-    },
-    [],
+  const { shown, skip } = useTypewriter(
+    text,
+    voiceFor(line.speaker, line.expression, attempt.rubric.profile),
   );
+  const portraitBase =
+    processing || recordBusy || line.speaker === "You"
+      ? "student-speaking"
+      : `child-${line.expression}`;
+  const talking =
+    !processing && !recordBusy && shown > 0 && shown < text.length;
+  const portraitSrc = talking
+    ? `/art/${portraitBase}-talk${[0, 1, 2, 1][Math.floor(shown / 4) % 4]}.png`
+    : `/art/${portraitBase}.png`;
   function next() {
     if (processing || recordBusy) return;
-    if (visible < text.length) {
-      setVisible(text.length);
+    if (shown < text.length) {
+      skip();
       return;
     }
     switch (stage.kind) {
@@ -289,13 +258,10 @@ export function Scene({
         </p>
         <button
           className="sound-button"
-          aria-pressed={!muted}
-          onClick={() => {
-            setMuted(!muted);
-            void context.current?.resume();
-          }}
+          aria-pressed={sound}
+          onClick={() => setSound(!sound)}
         >
-          {muted ? "Sound off" : "Sound on"}
+          {sound ? "Sound on" : "Sound off"}
         </button>
       </div>
       {attempt.sample && (
@@ -380,11 +346,7 @@ export function Scene({
           >
             <img
               className="dialogue-portrait"
-              src={
-                processing || recordBusy || line.speaker === "You"
-                  ? "/art/student-speaking.png"
-                  : `/art/child-${line.expression}.png`
-              }
+              src={portraitSrc}
               alt=""
             />
             <div className="dialogue-body">
@@ -403,14 +365,14 @@ export function Scene({
                     <span className="visually-hidden">Thinking</span>
                   </span>
                 ) : (
-                  text.slice(0, visible)
+                  text.slice(0, shown)
                 )}
               </p>
               {stage.kind !== "question" &&
                 (stage.kind !== "response" || stage.index === 0) &&
                 stage.kind !== "done" && (
                   <span className="advance-hint" aria-hidden="true">
-                    {visible < text.length ? "Show all" : "Next"}
+                    {shown < text.length ? "Show all" : "Next"}
                   </span>
                 )}
             </div>
