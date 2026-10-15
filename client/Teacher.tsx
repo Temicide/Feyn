@@ -217,8 +217,8 @@ export function Teacher({
         <span className="section-label">CONNECTED TO YOUR LOCAL APP</span>
         <p>
           Read-only MCP tools are available at{" "}
-          <code>{location.origin}/mcp</code>. U-Bot is not connected or
-          verified by this prototype. No classroom account system is included.
+          <code>{location.origin}/mcp</code>. U-Bot can reach them through the
+          Feyn bridge Chrome extension. No classroom account system is included.
         </p>
       </div>
     </div>

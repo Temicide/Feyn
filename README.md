@@ -77,9 +77,9 @@ Open [the production app](http://127.0.0.1:4173). Set `PORT` to serve on another
 
 The server exposes a stateless Streamable HTTP MCP endpoint at `http://127.0.0.1:4173/mcp`. It supports `initialize`, `ping`, `tools/list`, and `tools/call` with protocol version `2025-03-26`.
 
-The read tools are `get_assignment`, `list_attempts`, and `get_teacher_evidence`. They read the same persisted records and policy projection as the app. A client must support Streamable HTTP with JSON responses. There is no SSE subscription or standalone stdio transport.
+The read tools are `get_assignment`, `get_class_recap`, `list_attempts`, and `get_teacher_evidence`. `get_class_recap` returns per-concept counts without learner names. They read the same persisted records and policy projection as the app. A client must support Streamable HTTP with JSON responses. There is no SSE subscription or standalone stdio transport.
 
-Endpoint availability does not establish that the user's U-Bot host is connected. That connection requires verification from the host.
+U-Bot has no MCP client. The [Feyn bridge extension](extension/README.md) lets U-Bot request these tools through a JSON chat protocol. Each tool run and each message needs a click in the bridge panel. Feyn accepts `chrome-extension://` origins on `/mcp` only.
 
 ## Local data and limits
 

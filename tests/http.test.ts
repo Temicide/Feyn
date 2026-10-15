@@ -89,8 +89,47 @@ test("HTTP boundary rejects rebinding hosts and foreign origins while local app 
       .parse(mcp.body);
     assert.deepEqual(
       result.result.tools.map((tool) => tool.name),
-      ["get_assignment", "list_attempts", "get_teacher_evidence"],
+      ["get_assignment", "get_class_recap", "list_attempts", "get_teacher_evidence"],
     );
+    const rpc = (method: string, params: unknown, origin?: string) =>
+      localRequest(
+        `${url}/mcp`,
+        {
+          host: "127.0.0.1:4173",
+          "content-type": "application/json",
+          ...(origin ? { origin } : {}),
+        },
+        JSON.stringify({ jsonrpc: "2.0", id: 2, method, params }),
+      );
+    const bridge = await rpc(
+      "tools/call",
+      { name: "get_class_recap", arguments: {} },
+      "chrome-extension://feynbridgeextensionid",
+    );
+    assert.equal(bridge.status, 200);
+    const recapText = z
+      .object({ result: z.object({ content: z.array(z.object({ text: z.string() })) }) })
+      .parse(bridge.body).result.content[0]?.text ?? "";
+    const recap = z
+      .object({
+        learners: z.number(),
+        sampleLearners: z.number(),
+        concepts: z.array(z.object({ concept: z.string(), currentGaps: z.number() })).length(3),
+      })
+      .parse(JSON.parse(recapText));
+    assert.equal(recap.sampleLearners, recap.learners - 1);
+    for (const name of ["Maya", "Noah", "Eli", "June"])
+      assert.equal(recapText.includes(name), false, `recap omits ${name}`);
+    const unknown = await rpc("tools/call", { name: "toString" });
+    assert.deepEqual(
+      z.object({ error: z.object({ code: z.number() }) }).parse(unknown.body).error.code,
+      -32602,
+    );
+    const extensionOnApi = await localRequest(`${url}/api/teacher`, {
+      host: "127.0.0.1:4173",
+      origin: "chrome-extension://feynbridgeextensionid",
+    });
+    assert.equal(extensionOnApi.status, 403);
   } finally {
     server.close();
     await once(server, "close");

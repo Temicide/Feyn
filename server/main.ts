@@ -35,9 +35,11 @@ export function createApp(store: Attempts = new Attempts()): express.Express {
   app.use(express.json({ limit: "100kb" }));
   app.use((req, res, next) => {
     const origin = req.get("origin");
+    const bridge =
+      req.path === "/mcp" && origin?.startsWith("chrome-extension://");
     if (
       !hosts.includes(req.get("host") ?? "") ||
-      (origin && !origins.includes(origin))
+      (origin && !origins.includes(origin) && !bridge)
     ) {
       res.status(403).json({ error: "Local access only." });
       return;
@@ -213,38 +215,48 @@ export function createApp(store: Attempts = new Attempts()): express.Express {
     method: z.string(),
     params: z.record(z.string(), z.unknown()).optional(),
   });
-  const mcpTools = [
-    {
-      name: "get_assignment",
+  const noArguments = {
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  };
+  const mcpTools = new Map<string, { description: string; read: () => unknown }>(
+    Object.entries({
+    get_assignment: {
       description:
         "Read the canonical lesson, essential concepts, and diagnostic questions.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
+      read: () => lesson,
+    },
+    get_class_recap: {
+      description:
+        "Read per-concept counts of current gaps, resolved gaps, demonstrated and unassessed learners. Contains no learner names. Counts include labeled sample learners.",
+      read: () => {
+        const { learners, recap } = store.teacher();
+        return {
+          learners: learners.length,
+          sampleLearners: learners.filter((l) => l.sample).length,
+          concepts: recap.map((row) => ({
+            concept: row.title,
+            currentGaps: row.gaps.length,
+            resolved: row.resolved.length,
+            demonstrated: row.demonstrated.length,
+            unassessed: row.unassessed.length,
+          })),
+        };
       },
     },
-    {
-      name: "list_attempts",
+    list_attempts: {
       description:
         "Read preserved main and diagnostic assessments. Sample evidence is labeled.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
+      read: () => store.attempts(),
     },
-    {
-      name: "get_teacher_evidence",
+    get_teacher_evidence: {
       description:
         "Read original transcripts, corrections, review audit, unique-learner concept recap, and support queue.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
+      read: () => store.teacher(),
     },
-  ];
+    }),
+  );
   app.post("/mcp", (req, res) => {
     const message = rpcSchema.parse(req.body);
     if (message.id === undefined) {
@@ -266,25 +278,31 @@ export function createApp(store: Attempts = new Attempts()): express.Express {
         result = {};
         break;
       case "tools/list":
-        result = { tools: mcpTools };
+        result = {
+          tools: [...mcpTools].map(([name, tool]) => ({
+            name,
+            description: tool.description,
+            inputSchema: noArguments,
+          })),
+        };
         break;
       case "tools/call": {
         const call = z
           .object({
-            name: z.enum([
-              "get_assignment",
-              "list_attempts",
-              "get_teacher_evidence",
-            ]),
+            name: z.string(),
             arguments: z.object({}).optional(),
           })
           .parse(message.params);
-        const data =
-          call.name === "get_assignment"
-            ? lesson
-            : call.name === "list_attempts"
-              ? store.attempts()
-              : store.teacher();
+        const tool = mcpTools.get(call.name);
+        if (!tool) {
+          res.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32602, message: `Unknown tool: ${call.name}` },
+          });
+          return;
+        }
+        const data = tool.read();
         result = { content: [{ type: "text", text: JSON.stringify(data) }] };
         break;
       }

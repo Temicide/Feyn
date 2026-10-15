@@ -24,7 +24,7 @@ The two independent candidates compared browser-owned IndexedDB sessions and ser
 
 ## Provider status
 
-A real request to the configured loopback Anthropic-compatible endpoint returned HTTP 200 and READY. Name that provider Local AI gateway and retain its model identity in evidence. This is not a completed U-Bot connection. ElevenLabs Scribe v2 transcription has been verified with synthetic audio. Credentials remain in ignored server configuration. The U-Bot host connection has not been verified. Provider errors remain operational errors rather than conceptual failures.
+A real request to the configured loopback Anthropic-compatible endpoint returned HTTP 200 and READY. Name that provider Local AI gateway and retain its model identity in evidence. This is not a completed U-Bot connection. ElevenLabs Scribe v2 transcription has been verified with synthetic audio. Credentials remain in ignored server configuration. U-Bot has no MCP client or connector setting; its client calls only chat, code, transcription, media, and history endpoints. The extension/ bridge relays U-Bot's JSON tool calls to /mcp from a Chrome background worker. Provider errors remain operational errors rather than conceptual failures.
 
 Expose a standards-based MCP endpoint over the same application owner if feasible. A server endpoint is not evidence of a connected U-Bot host. Keep the local prototype bound to loopback. No external deployment in this task.
 

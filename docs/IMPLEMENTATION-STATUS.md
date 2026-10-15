@@ -11,11 +11,12 @@ Feyn implements one English lesson. A learner explains the cart-speed problem to
 - One required application answer and an optional second answer. Incorrect diagnostic answers do not revoke main-explanation completion.
 - Durable recordings, separate main and diagnostic results, teacher review history, and the latest usable concept evidence.
 - A clearly labeled sample walkthrough and authored example classmates. Synthetic audio fixtures do not demonstrate a learning benefit.
-- A local read-only MCP endpoint. An endpoint is not proof of a connected U-Bot host.
+- A local read-only MCP endpoint, including a names-free class recap tool.
+- A Chrome extension that lets U-Bot call those tools through a JSON chat protocol, one click per tool run.
 
 ## Remaining work
 
-The U-Bot host connection is not verified. The current live assessor is the configured Local AI gateway.
+U-Bot has no native MCP client, so the bridge relies on U-Bot following a chat protocol. The bridge panel ran inside a signed-in u.bot page; a full U-Bot round trip awaits the operator's clicks. The current live assessor is the configured Local AI gateway.
 
 Automatic individual support flags are deferred until the system can record a fresh application question and evidence that the same specific misconception persists after a review opportunity. Current concept gaps remain visible for the teacher's recap. Repeated main submissions or a missed optional question alone must not trigger intervention.
 
