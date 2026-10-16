@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from "react";
+import type { WorkStatus } from "../shared/contracts.js";
+import { workStatusView } from "./workStatus.js";
 
 export function failure(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -14,10 +16,20 @@ export function dueLabel(dueDate: string | null): string | null {
   })}`;
 }
 
-export function StatusChip({ completed }: { completed: boolean }) {
+export function StatusChip({
+  status,
+  dueDate,
+}: {
+  status: WorkStatus;
+  dueDate: string | null;
+}) {
+  const view = workStatusView(status, dueDate);
   return (
-    <span className={`status-chip ${completed ? "done" : ""}`}>
-      {completed ? "Done" : "Assigned"}
+    <span className="status-group">
+      <span className={`status-chip ${view.tone}`}>{view.label}</span>
+      {view.details.length > 0 && (
+        <span className="status-detail">{view.details.join(" · ")}</span>
+      )}
     </span>
   );
 }

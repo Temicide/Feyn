@@ -5,13 +5,14 @@ import {
   type Answer,
   type Assignment,
   type Attempt,
-  type Completion,
   type Criterion,
   type Learner,
   type MainAssessment,
   type Review,
   type TeacherData,
+  type WorkStatus,
 } from "../shared/contracts.js";
+import { workStatus } from "../shared/work-status.js";
 import { deriveOutcome } from "./providers.js";
 import { rubricOf } from "./rubric.js";
 import type { Kind, RecordStore, Records } from "./store.js";
@@ -182,14 +183,11 @@ export class Attempts {
     if (!found) throw new Error("Recorded answer not found.");
     return found;
   }
-  async completion(
-    learnerId: string,
-    assignmentId: string,
-  ): Promise<Completion | null> {
-    return (
-      (await this.list("completion")).find(
-        (c) => c.learnerId === learnerId && c.assignmentId === assignmentId,
-      ) ?? null
+  async workStatus(learnerId: string, assignmentId: string): Promise<WorkStatus> {
+    return workStatus(
+      (await this.attempts()).filter(
+        (a) => a.learnerId === learnerId && a.assignmentId === assignmentId,
+      ),
     );
   }
   async create(
@@ -224,6 +222,7 @@ export class Attempts {
       mainAssessment: null,
       diagnostics: [],
       reviews: [],
+      reviewRequest: null,
       endingVariant: Math.random() < 0.5 ? 0 : 1,
     };
     await this.store.put("attempt", attempt);
@@ -324,7 +323,6 @@ export class Attempts {
     const updated = { ...attempt, mainAssessment: assessment };
     await this.store.put("attempt", updated);
     await this.lockOnFirstSubmission(updated);
-    await this.grant(updated, assessment.outcome);
     return updated;
   }
   async recordDiagnostic(
@@ -400,7 +398,28 @@ export class Attempts {
     };
     const updated = { ...attempt, reviews: [...attempt.reviews, review] };
     await this.store.put("attempt", updated);
-    await this.grant(updated, review.outcome);
+    return updated;
+  }
+  async requestReview(id: string, note: string): Promise<Attempt> {
+    const attempt = await this.get(id);
+    if (attempt.sample)
+      throw new Error("Sample walkthroughs can't be sent to a teacher.");
+    if (!attempt.mainAssessment)
+      throw new Error("Turn in your explanation before asking for a check.");
+    if (attempt.reviews.length > 0)
+      throw new Error("Your teacher has already checked this explanation.");
+    if (attempt.mainAssessment.outcome === "pass")
+      throw new Error("Pip already approved this explanation.");
+    if (attempt.reviewRequest)
+      throw new Error("You already asked your teacher to check this explanation.");
+    const status = await this.workStatus(attempt.learnerId, attempt.assignmentId);
+    if (status.kind === "none" || status.attemptId !== id || !status.canRequestReview)
+      throw new Error("Only the explanation that sets your status can be sent to your teacher.");
+    const updated = {
+      ...attempt,
+      reviewRequest: { at: new Date().toISOString(), note: note.trim().slice(0, 300) },
+    };
+    await this.store.put("attempt", updated);
     return updated;
   }
   async finish(id: string): Promise<Attempt> {
@@ -443,19 +462,5 @@ export class Attempts {
     );
     if (assignment && !assignment.locked)
       await this.store.put("assignment", { ...assignment, locked: true });
-  }
-  private async grant(
-    attempt: Attempt,
-    outcome: MainAssessment["outcome"],
-  ): Promise<void> {
-    if (outcome !== "pass") return;
-    const done = await this.completion(attempt.learnerId, attempt.assignmentId);
-    if (!done)
-      await this.store.put("completion", {
-        id: `${attempt.learnerId}:${attempt.assignmentId}`,
-        learnerId: attempt.learnerId,
-        assignmentId: attempt.assignmentId,
-        at: new Date().toISOString(),
-      });
   }
 }

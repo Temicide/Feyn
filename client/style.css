@@ -318,9 +318,62 @@ svg {
   border-radius: 999px;
   padding: 3px 12px;
 }
-.status-chip.done {
+.status-chip.approved {
   color: var(--done);
   background: var(--done-soft);
+}
+.status-chip.waiting {
+  color: #7a5200;
+  background: #fff6d9;
+}
+.status-chip.missing,
+.status-chip.not-approved {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.requested-tag {
+  color: #7a5200;
+  background: #fff6d9;
+}
+.review-request-note {
+  font-size: 15px;
+  background: #fff6d9;
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+.status-group {
+  flex: none;
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-row .choice[aria-pressed="true"] {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.work-list {
+  display: grid;
+  gap: 12px;
+}
+.status-explain {
+  font-size: 15px;
+}
+.review-request {
+  display: grid;
+  gap: 8px;
+}
+.review-request textarea {
+  min-height: 72px;
+}
+.status-detail {
+  font-size: 13px;
+  color: var(--ink-2);
 }
 .gold-star {
   display: flex;
@@ -2515,10 +2568,11 @@ fieldset:disabled select {
     font-size: 28px;
   }
 }
+/* The game screen's motion is the dialogue itself, so it opts out. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  :not(.game-screen, .game-screen *),
+  :not(.game-screen, .game-screen *)::before,
+  :not(.game-screen, .game-screen *)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

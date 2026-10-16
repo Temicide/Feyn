@@ -29,7 +29,8 @@ const env = {
   MCP_TOKEN: "mcp-test-token",
 };
 const local = "127.0.0.1:4173";
-const server = createApp(new MemoryStore(), env).listen(0, "127.0.0.1");
+const records = new MemoryStore();
+const server = createApp(records, env).listen(0, "127.0.0.1");
 await once(server, "listening");
 after(() => server.close());
 const address = server.address();
@@ -581,7 +582,7 @@ test("a student joins with a code, leaves, and gets their history back on rejoin
   assert.equal((await enroll(cookie, " feyn01 ")).status, 200);
   const [course] = await courses();
   assert.equal(course?.title, "Calculus 1 · Rates of change");
-  assert.deepEqual(course?.assignments.map((a) => [a.id, a.completedAt]), [["cart-speed", null]]);
+  assert.deepEqual(course?.assignments.map((a) => [a.id, a.status]), [["cart-speed", { kind: "none" }]]);
 
   const attempt = attemptSchema.parse(
     (await call("/api/attempts", json(cookie, "POST", { ...attemptBody, sample: true }))).body,
@@ -843,4 +844,75 @@ test("a teacher posts text and pictures that only their class can see, and can d
     .find((c) => c.id === created.id);
   assert.deepEqual(after?.posts, []);
   assert.equal((await call(imagePath, { headers: { cookie: student } })).status, 404);
+});
+
+test("a student sends a review request and the status shows on bootstrap and the course list", async () => {
+  const student = await signIn("ask@school.test", "Ash Asker");
+  const other = await signIn("nosy@school.test", "Nox Nosy");
+  await enroll(student);
+  await enroll(other);
+  const path = "/api/assignments/cart-speed/bootstrap";
+  const status = async (cookie: string) =>
+    bootstrapSchema.parse((await call(path, { headers: { cookie } })).body).status;
+  assert.deepEqual(await status(student), { kind: "none" });
+
+  const created = attemptSchema.parse(
+    (await call("/api/attempts", json(student, "POST", attemptBody))).body,
+  );
+  const concepts = created.rubric.concepts;
+  const criteria = concepts.map((c) => ({
+    id: c.id,
+    state: "missing" as const,
+    quote: "",
+    reason: "Not mentioned.",
+  }));
+  await records.put("attempt", {
+    ...created,
+    mainAssessment: {
+      kind: "main",
+      outcome: "needs-work",
+      criteria,
+      majorError: false,
+      summary: "Missing ideas.",
+      provider: "Test fixture",
+      model: "fixture",
+      at: "2026-10-15T12:00:00.000Z",
+    },
+  });
+  const turnedIn = {
+    kind: "not-approved",
+    by: "pip",
+    attemptId: created.id,
+    turnedInAt: "2026-10-15T12:00:00.000Z",
+    canRequestReview: true,
+  };
+  assert.deepEqual(await status(student), turnedIn);
+
+  const request = `/api/attempts/${created.id}/review-request`;
+  assert.equal((await call(request, json(other, "POST", { note: "" }))).status, 404);
+  assert.equal(
+    (await call(request, json(student, "POST", { note: "x".repeat(301) }))).status,
+    400,
+  );
+  const sent = await call(request, json(student, "POST", { note: "  I explained the interval.  " }));
+  assert.equal(sent.status, 200);
+  assert.equal(attemptSchema.parse(sent.body).reviewRequest?.note, "I explained the interval.");
+  assert.deepEqual(await status(student), {
+    kind: "waiting",
+    reason: "requested",
+    attemptId: created.id,
+    turnedInAt: "2026-10-15T12:00:00.000Z",
+    canRequestReview: false,
+  });
+  assert.equal((await call(request, json(student, "POST", { note: "" }))).status, 400);
+
+  const course = studentCoursesSchema
+    .parse((await call("/api/courses", { headers: { cookie: student } })).body)
+    .find((c) => c.id === "demo-calculus-1");
+  assert.equal(course?.assignments[0]?.status.kind, "waiting");
+  const teacher = await signIn("teacher@school.test", "Ms Rivera");
+  const card = teacherCourseSchema
+    .parse((await call("/api/teacher/courses/demo-calculus-1", { headers: { cookie: teacher } })).body)
+    .assignments.find((a) => a.id === "cart-speed");
+  assert.ok(card && card.waiting >= 1);
 });

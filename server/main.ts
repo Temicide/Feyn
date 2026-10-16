@@ -30,6 +30,7 @@ import {
   postImageMimes,
   postTextSchema,
   replacementSchema,
+  reviewRequestInputSchema,
   teacherReviewRequestSchema,
   submissionSchema,
   reviewedTranscript,
@@ -341,7 +342,7 @@ export function createApp(
       assignment,
       courseTitle: course.title,
       learner,
-      completedAt: (await store.completion(learner.id, assignment.id))?.at ?? null,
+      status: await store.workStatus(learner.id, assignment.id),
       attempts: (await store.attempts()).filter(
         (a) => a.assignmentId === assignment.id && belongsTo(a, learner.id),
       ),
@@ -500,6 +501,11 @@ export function createApp(
   app.post("/api/attempts/:id/finish", async (req, res) =>
     res.json(await store.finish((await ownAttempt(req, req.params.id)).id)),
   );
+  app.post("/api/attempts/:id/review-request", async (req, res) => {
+    const attempt = await ownAttempt(req, req.params.id);
+    const input = reviewRequestInputSchema.parse(req.body);
+    res.json(await store.requestReview(attempt.id, input.note));
+  });
   app.post("/api/attempts/:id/review", async (req, res) => {
     const session = await teacher(req);
     const input = teacherReviewRequestSchema.parse(req.body);

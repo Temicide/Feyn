@@ -354,7 +354,7 @@ export function TeacherCoursePage({
                   <p className="post-title">
                     {a.title || "Untitled draft"}{" "}
                     <span
-                      className={`status-chip ${a.state === "posted" ? "done" : ""}`}
+                      className={`status-chip ${a.state === "posted" ? "approved" : ""}`}
                     >
                       {a.state === "draft"
                         ? "Draft"
@@ -365,7 +365,7 @@ export function TeacherCoursePage({
                   </p>
                   <p className="post-meta">
                     {a.state === "posted"
-                      ? `${a.completed} of ${a.enrolled} completed · ${a.gapConcepts} ${a.gapConcepts === 1 ? "concept" : "concepts"} with current gaps`
+                      ? `${a.completed} of ${a.enrolled} completed · ${a.waiting} waiting for review · ${a.gapConcepts} ${a.gapConcepts === 1 ? "concept" : "concepts"} with current gaps`
                       : "Students can't see drafts."}
                     {due && ` · ${due}`}
                   </p>

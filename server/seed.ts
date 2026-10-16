@@ -156,16 +156,10 @@ async function seedDemo(store: RecordStore, teacher: string): Promise<void> {
       },
       diagnostics: [],
       reviews: [],
+      reviewRequest: null,
       endingVariant: 0,
     };
     await store.put("attempt", attempt);
-    if (outcome === "pass")
-      await store.put("completion", {
-        id: `${item.id}:${assignment.id}`,
-        learnerId: item.id,
-        assignmentId: assignment.id,
-        at: createdAt,
-      });
   }
   await store.setSetting("demo-seeded", "seeded");
 }
