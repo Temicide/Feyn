@@ -94,6 +94,11 @@ async function lessonFlow(records: () => RecordStore) {
     2,
     "sample classmates are seeded once per database",
   );
+  assert.notEqual(
+    (await reopened.store.workStatus("sample-eli", assignment.id)).kind,
+    "none",
+    "seeded classmates' work counts toward the class",
+  );
   assert.ok(
     teacher.recap
       .find((c) => c.id === interval)

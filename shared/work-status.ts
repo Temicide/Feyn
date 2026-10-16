@@ -26,7 +26,6 @@ function rank(standing: AttemptStanding): number {
 
 export function workStatus(attempts: Attempt[]): WorkStatus {
   const turnedIn = attempts
-    .filter((a) => !a.sample)
     .flatMap((attempt) => {
       const standing = attemptStanding(attempt);
       return standing && attempt.mainAssessment
