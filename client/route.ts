@@ -52,6 +52,20 @@ export function href(route: Route): string {
   }
 }
 
+const pageLabels: Record<Route["kind"], string> = {
+  courses: "My courses",
+  course: "Course",
+  assignment: "Assignment",
+  desk: "Teacher's desk",
+  "teach-course": "Teach course",
+  evidence: "Student work",
+  edit: "Edit assignment",
+};
+
+export function pageTitle(route: Route, context: string): string {
+  return [pageLabels[route.kind], context, "Feyn"].filter(Boolean).join(" | ");
+}
+
 export function go(route: Route): void {
   location.hash = href(route);
 }
