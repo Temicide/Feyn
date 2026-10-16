@@ -596,8 +596,8 @@ function Evidence({
           </button>
           {error && <p className="error">{error}</p>}
           <p className="fine-print">
-            A correction updates the current interpretation and recap. Earlier
-            evidence and any earned completion remain in history.
+            A correction updates the current interpretation, the recap and the
+            student's status. Earlier evidence stays in history.
           </p>
         </section>
       )}

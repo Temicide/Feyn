@@ -238,80 +238,80 @@ export function CoursePage({
       {tab === "work" ? (
         <YourWork assignments={course.assignments} />
       ) : (
-      <div className="stream-grid">
-        <aside className="card upcoming">
-          <h2>Upcoming</h2>
-          {upcoming.length === 0 ? (
-            <p className="fine-print">Nothing due right now.</p>
-          ) : (
-            upcoming.slice(0, 3).map((a) => (
-              <a
-                key={a.id}
-                className="upcoming-item"
-                href={href({ kind: "assignment", assignmentId: a.id })}
-              >
-                <span>{dueLabel(a.dueDate) ?? "Due when you're ready"}</span>
-                {a.title}
-              </a>
-            ))
-          )}
-        </aside>
-        <div className="stream-posts">
-          {course.assignments.length === 0 && (
-            <p className="card post fine-print">
-              Nothing posted yet. New assignments from your teacher will show
-              up here.
-            </p>
-          )}
-          {course.assignments.map((a) => {
-            const due = dueLabel(a.dueDate);
-            return (
-              <a
-                key={a.id}
-                className="card post post-assignment"
-                href={href({ kind: "assignment", assignmentId: a.id })}
-              >
-                <span className="post-icon" aria-hidden="true">
-                  <Sparkle />
-                </span>
-                <span className="post-body">
-                  <span className="post-title">New assignment: {a.title}</span>
-                  <span className="post-meta">
-                    {due ? `${due} · ` : ""}Teach Pip out loud, then answer a
-                    question or two
-                  </span>
-                </span>
-                <StatusChip status={a.status} dueDate={a.dueDate} />
-              </a>
-            );
-          })}
-          <article className="card post">
-            <img
-              className="pixel-avatar"
-              src="/art/child-puzzled.png"
-              alt=""
-            />
-            <div className="post-body">
-              <p className="post-title">Pip</p>
-              <p className="bubble">
-                I'm ready to learn! Explain it to me like I've never heard of
-                it, and I'll ask you about the tricky parts.
+        <div className="stream-grid">
+          <aside className="card upcoming">
+            <h2>Upcoming</h2>
+            {upcoming.length === 0 ? (
+              <p className="fine-print">Nothing due right now.</p>
+            ) : (
+              upcoming.slice(0, 3).map((a) => (
+                <a
+                  key={a.id}
+                  className="upcoming-item"
+                  href={href({ kind: "assignment", assignmentId: a.id })}
+                >
+                  <span>{dueLabel(a.dueDate) ?? "Due when you're ready"}</span>
+                  {a.title}
+                </a>
+              ))
+            )}
+          </aside>
+          <div className="stream-posts">
+            {course.assignments.length === 0 && (
+              <p className="card post fine-print">
+                Nothing posted yet. New assignments from your teacher will show
+                up here.
               </p>
+            )}
+            {course.assignments.map((a) => {
+              const due = dueLabel(a.dueDate);
+              return (
+                <a
+                  key={a.id}
+                  className="card post post-assignment"
+                  href={href({ kind: "assignment", assignmentId: a.id })}
+                >
+                  <span className="post-icon" aria-hidden="true">
+                    <Sparkle />
+                  </span>
+                  <span className="post-body">
+                    <span className="post-title">New assignment: {a.title}</span>
+                    <span className="post-meta">
+                      {due ? `${due} · ` : ""}Teach Pip out loud, then answer a
+                      question or two
+                    </span>
+                  </span>
+                  <StatusChip status={a.status} dueDate={a.dueDate} />
+                </a>
+              );
+            })}
+            <article className="card post">
+              <img
+                className="pixel-avatar"
+                src="/art/child-puzzled.png"
+                alt=""
+              />
+              <div className="post-body">
+                <p className="post-title">Pip</p>
+                <p className="bubble">
+                  I'm ready to learn! Explain it to me like I've never heard of
+                  it, and I'll ask you about the tricky parts.
+                </p>
+              </div>
+            </article>
+            <div className="course-actions">
+              <Confirm
+                label="Leave course"
+                question="Leave this course?"
+                confirmLabel="Leave course"
+                onConfirm={leave}
+              >
+                Your work is kept. Join again with the code to pick up where you
+                left off.
+              </Confirm>
             </div>
-          </article>
-          <div className="course-actions">
-            <Confirm
-              label="Leave course"
-              question="Leave this course?"
-              confirmLabel="Leave course"
-              onConfirm={leave}
-            >
-              Your work is kept. Join again with the code to pick up where you
-              left off.
-            </Confirm>
           </div>
         </div>
-      </div>
       )}
     </div>
   );
