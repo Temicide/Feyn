@@ -6,6 +6,7 @@ import {
   type StudentCourse,
 } from "../shared/contracts.js";
 import { api, json } from "./api.js";
+import { PostCard } from "./Posts.js";
 import { go, href } from "./route.js";
 import {
   Confirm,
@@ -235,12 +236,15 @@ export function CoursePage({
           )}
         </aside>
         <div className="stream-posts">
-          {course.assignments.length === 0 && (
+          {course.assignments.length === 0 && course.posts.length === 0 && (
             <p className="card post fine-print">
-              Nothing posted yet. New assignments from your teacher will show
-              up here.
+              Nothing posted yet. New posts and assignments from your teacher
+              will show up here.
             </p>
           )}
+          {course.posts.map((post) => (
+            <PostCard key={post.id} post={post} byline="Announcement" />
+          ))}
           {course.assignments.map((a) => {
             const due = dueLabel(a.dueDate);
             return (

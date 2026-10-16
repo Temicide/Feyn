@@ -1,4 +1,4 @@
-import type { Assignment, Attempt, Course } from "../shared/contracts.js";
+import type { Assignment, Attempt, Course, Post } from "../shared/contracts.js";
 import { enrollmentId, normalizeEmail } from "./courses.js";
 import { deriveOutcome } from "./providers.js";
 import { conceptsFromInput, rubricOf } from "./rubric.js";
@@ -7,6 +7,9 @@ import type { RecordStore } from "./store.js";
 export const demoJoinCode = "FEYN01";
 export const demoCourseId = "demo-calculus-1";
 export const cartSpeedId = "cart-speed";
+export const tutorialCourseId = "lets-get-started";
+export const tutorialJoinCode = "HELLO1";
+export const firstLessonId = "first-lesson";
 const fallbackTeacher = "teacher@feyn.invalid";
 
 const cartConcepts = [
@@ -52,8 +55,9 @@ export async function prepare(
         addedBy: "TEACHER_EMAILS",
         addedAt: new Date().toISOString(),
       });
-  if (!(await store.getSetting("demo-seeded")))
-    await seedDemo(store, normalizeEmail(teacherEmails[0] ?? fallbackTeacher));
+  const owner = normalizeEmail(teacherEmails[0] ?? fallbackTeacher);
+  if (!(await store.getSetting("demo-seeded"))) await seedDemo(store, owner);
+  if (!(await store.getSetting("tutorial-seeded"))) await seedTutorial(store, owner);
 }
 
 export function cartSpeedAssignment(createdAt: string): Assignment {
@@ -164,4 +168,134 @@ async function seedDemo(store: RecordStore, teacher: string): Promise<void> {
       });
   }
   await store.setSetting("demo-seeded", "seeded");
+}
+
+const tutorialPosts: { text: string; image: string }[] = [
+  {
+    image: "/art/child-listening.png",
+    text: `Welcome to Feyn!
+
+This is Pip. Pip is curious about everything but doesn't know much yet. On Feyn you learn an idea by teaching it to Pip out loud. If you can explain it so Pip understands, you really know it.
+
+These posts show you around. Read them from top to bottom, then try the practice assignment at the bottom of this page.`,
+  },
+  {
+    image: "/art/classroom.svg",
+    text: `Join your class
+
+Your teacher gives you a join code. Open Courses in the top bar, type the code into "Join a course" and press Join. The course then appears on your Courses page.
+
+Open a course to see your teacher's posts and assignments. The Upcoming box shows what is due next.`,
+  },
+  {
+    image: "/art/student-speaking.png",
+    text: `Teach Pip an assignment
+
+1. Open an assignment and read the question on the chalkboard.
+2. Press record and explain the answer out loud in your own words, as if Pip has never heard of the idea.
+3. Check your words. If the transcript misheard you, fix up to three words.
+4. Submit. Pip listens, then asks one or two follow-up questions about the tricky parts.
+
+Not ready to record yet? Choose "Try the sample walkthrough" to watch how it works first. It never counts as your own work.`,
+  },
+  {
+    image: "/art/child-aha.png",
+    text: `After you finish
+
+When Pip understands your explanation, the assignment is marked Done. You can try again any time to explain it better, and trying again never takes a Done away.
+
+Your teacher can listen to your recording and see what Pip noticed, so they know which ideas to go over in class.`,
+  },
+  {
+    image: "/art/child-thinking.png",
+    text: `For teachers
+
+If you have a teacher account, you also see Teacher's desk in the top bar. From there you can:
+- create a course and share its join code with your students,
+- write an assignment from a question and a reference answer, with U-Bot drafting the key concepts and follow-up questions for you to edit,
+- post announcements with text and pictures to your class, like these posts,
+- open an assignment's evidence to hear each recording and see which ideas the class is still missing.`,
+  },
+  {
+    image: "/art/child-puzzled.png",
+    text: `Your turn!
+
+The practice assignment "Your first lesson: day and night" is just below. It is short, so you can try the whole thing once.
+
+When you no longer need this course, you can leave it from the bottom of this page. To come back later, join with the code ${tutorialJoinCode}.`,
+  },
+];
+
+export function firstLessonAssignment(createdAt: string): Assignment {
+  const concepts = conceptsFromInput([
+    {
+      title: "The Earth spins",
+      description: "The Earth turns once on its own axis about every 24 hours.",
+    },
+    {
+      title: "One side faces the Sun",
+      description:
+        "The Sun lights only the half of the Earth facing it. That half has day and the other half has night.",
+    },
+  ]);
+  const [spin, side] = concepts;
+  if (!spin || !side) throw new Error("Seed concepts missing.");
+  return {
+    id: firstLessonId,
+    courseId: tutorialCourseId,
+    title: "Your first lesson: day and night",
+    question:
+      "Why do we have day and night? Explain it to Pip as if Pip has never thought about it.",
+    reference:
+      "The Earth spins on its axis about once every 24 hours. The Sun lights only the half of the Earth that faces it. Your side has day while it faces the Sun and night while it faces away. The Sun does not travel around the Earth each day; the Earth's turning makes the Sun seem to rise and set.",
+    profile: "playful",
+    concepts,
+    followups: [
+      {
+        id: "followup-1",
+        conceptIds: [spin.id],
+        question:
+          "If the Earth spun twice as fast, how long would one day and one night last together?",
+        expected:
+          "About 12 hours instead of 24, because your side would turn toward and away from the Sun twice as often.",
+      },
+      {
+        id: "followup-2",
+        conceptIds: [spin.id, side.id],
+        question:
+          "Pip thinks the Sun goes around the Earth every day. What would you tell Pip?",
+        expected:
+          "The Sun only seems to move across the sky. The Earth's spin carries us into the sunlight and back out of it.",
+      },
+    ],
+    state: "posted",
+    locked: false,
+    dueDate: null,
+    revision: 0,
+    createdAt,
+  };
+}
+
+async function seedTutorial(store: RecordStore, teacher: string): Promise<void> {
+  const now = Date.now();
+  await store.put("course", {
+    id: tutorialCourseId,
+    title: "Let's Get Started",
+    teacherId: teacher,
+    joinCode: tutorialJoinCode,
+    createdAt: new Date(now).toISOString(),
+  });
+  for (const [index, item] of tutorialPosts.entries()) {
+    const post: Post = {
+      id: `tutorial-${index + 1}`,
+      courseId: tutorialCourseId,
+      text: item.text,
+      images: [{ source: "bundled", path: item.image }],
+      createdAt: new Date(now - index * 60000).toISOString(),
+      removedAt: null,
+    };
+    await store.put("post", post);
+  }
+  await store.put("assignment", firstLessonAssignment(new Date(now).toISOString()));
+  await store.setSetting("tutorial-seeded", "seeded");
 }
