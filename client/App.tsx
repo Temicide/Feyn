@@ -10,7 +10,7 @@ import { api, json } from "./api.js";
 import { AssignmentPage } from "./Assignment.js";
 import { AssignmentForm } from "./AssignmentForm.js";
 import { CoursePage, StudentHome } from "./Courses.js";
-import { href, useRoute, type Route } from "./route.js";
+import { href, pageTitle, useRoute, type Route } from "./route.js";
 import { Teacher } from "./Teacher.js";
 import { DeskHome, TeacherCoursePage } from "./TeacherCourses.js";
 import { Typed } from "./Typed.js";
@@ -130,6 +130,16 @@ function Classroom({
 }) {
   const route = useRoute(),
     [context, setContext] = useState("");
+  const viewed: Route =
+    me.role !== "teacher" &&
+    route.kind !== "course" &&
+    route.kind !== "assignment"
+      ? { kind: "courses" }
+      : route;
+  useEffect(() => {
+    document.title = pageTitle(viewed, context);
+  }, [viewed.kind, context]);
+  useEffect(() => () => void (document.title = "Feyn"), []);
   const teaching =
     me.role === "teacher" &&
     (route.kind === "desk" ||
