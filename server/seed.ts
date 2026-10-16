@@ -192,9 +192,9 @@ Open a course to see your teacher's posts and assignments. The Upcoming box show
     text: `Teach Pip an assignment
 
 1. Open an assignment and read the question on the chalkboard.
-2. Press record and explain the answer out loud in your own words, as if Pip has never heard of the idea.
+2. Press the red record button and explain the answer out loud in your own words, as if Pip has never heard of the idea.
 3. Check your words. If the transcript misheard you, fix up to three words.
-4. Submit. Pip listens, then asks one or two follow-up questions about the tricky parts.
+4. Press "Send to Pip". Pip listens, then asks one or two follow-up questions about the tricky parts.
 
 Not ready to record yet? Choose "Try the sample walkthrough" to watch how it works first. It never counts as your own work.`,
   },

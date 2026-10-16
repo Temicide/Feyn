@@ -62,8 +62,8 @@ export function createApp(
     config,
     async (session) => {
       const isNew = !(await store.learners()).some((l) => l.id === session.sub);
-      await store.signIn(session.sub, session.name);
       if (isNew) await courses.welcome(tutorialCourseId, session.sub, session.email);
+      await store.signIn(session.sub, session.name);
     },
     (email) => courses.isTeacher(email),
   );

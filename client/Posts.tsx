@@ -111,10 +111,21 @@ export function PostComposer({
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     input = useRef<HTMLInputElement>(null);
+  const previews = useRef(new Set<string>());
   useEffect(
-    () => () => pictures.forEach((p) => URL.revokeObjectURL(p.preview)),
-    [pictures],
+    () => () => previews.current.forEach((url) => URL.revokeObjectURL(url)),
+    [],
   );
+  function preview(blob: Blob): string {
+    const url = URL.createObjectURL(blob);
+    previews.current.add(url);
+    return url;
+  }
+  function drop(picked: Picked) {
+    URL.revokeObjectURL(picked.preview);
+    previews.current.delete(picked.preview);
+    setPictures((current) => current.filter((p) => p !== picked));
+  }
   async function pick(files: FileList | null) {
     setError("");
     const chosen = [...(files ?? [])];
@@ -123,17 +134,13 @@ export function PostComposer({
       return;
     }
     try {
-      const added = await Promise.all(
-        chosen.map(async (file) => {
-          const blob = await shrink(file);
-          return {
-            key: `${file.name}-${file.lastModified}-${Math.random()}`,
-            blob,
-            preview: URL.createObjectURL(blob),
-          };
-        }),
-      );
-      setPictures([...pictures, ...added]);
+      const blobs = await Promise.all(chosen.map(shrink));
+      const added = blobs.map((blob, index) => ({
+        key: `${chosen[index]?.name}-${crypto.randomUUID()}`,
+        blob,
+        preview: preview(blob),
+      }));
+      setPictures((current) => [...current, ...added].slice(0, maxPostImages));
     } catch (e) {
       setError(failure(e, "Could not add that picture."));
     }
@@ -150,7 +157,7 @@ export function PostComposer({
         body: form,
       });
       setText("");
-      setPictures([]);
+      pictures.forEach(drop);
       await onPosted();
     } catch (e) {
       setError(failure(e, "Could not post that."));
@@ -186,7 +193,7 @@ export function PostComposer({
                 type="button"
                 className="composer-remove"
                 aria-label="Remove picture"
-                onClick={() => setPictures(pictures.filter((x) => x !== p))}
+                onClick={() => drop(p)}
               >
                 ×
               </button>

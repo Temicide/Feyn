@@ -768,11 +768,17 @@ details > div {
 .post-images-1 img {
   object-fit: contain;
 }
+.post-images a:has(.post-image-art) {
+  justify-self: start;
+  border: 0;
+  background: #000;
+}
 .post-images img.post-image-art {
-  max-height: 200px;
-  object-fit: contain;
+  width: auto;
+  max-width: 100%;
+  height: 160px;
+  padding: 10px;
   image-rendering: pixelated;
-  padding: 12px;
 }
 .composer {
   display: grid;
