@@ -331,6 +331,16 @@ svg {
   color: var(--danger);
   background: var(--danger-soft);
 }
+.requested-tag {
+  color: #7a5200;
+  background: #fff6d9;
+}
+.review-request-note {
+  font-size: 15px;
+  background: #fff6d9;
+  border-radius: 12px;
+  padding: 8px 12px;
+}
 .status-group {
   flex: none;
   display: grid;

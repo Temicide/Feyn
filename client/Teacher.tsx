@@ -10,6 +10,7 @@ import {
 } from "../shared/contracts.js";
 import type { z } from "zod";
 import { api, json } from "./api.js";
+import { attemptStanding } from "../shared/work-status.js";
 import { href } from "./route.js";
 import { failure, Loading } from "./ui.js";
 
@@ -18,6 +19,11 @@ const labels = {
   "needs-work": "Main explanation needs work",
   "not-enough-evidence": "Not enough evidence",
 };
+function reviewQueueTier(attempt: Attempt): number {
+  const standing = attemptStanding(attempt);
+  if (attempt.sample || standing?.kind !== "waiting") return 2;
+  return standing.reason === "requested" ? 0 : 1;
+}
 const edited = (attempt: Attempt, data: TeacherView) =>
   attempt.rubric.revision < data.assignment.revision;
 export function Teacher({
@@ -72,8 +78,10 @@ export function Teacher({
     }
   }
   const attempts =
-      data?.attempts.toSorted((a, b) =>
-        b.createdAt.localeCompare(a.createdAt),
+      data?.attempts.toSorted(
+        (a, b) =>
+          reviewQueueTier(a) - reviewQueueTier(b) ||
+          b.createdAt.localeCompare(a.createdAt),
       ) ?? [],
     active =
       attempts.find((a) => a.id === selected) ??
@@ -267,6 +275,11 @@ export function Teacher({
                       Edited since
                     </small>
                   )}
+                  {reviewQueueTier(attempt) === 0 && (
+                    <small className="sample-tag requested-tag">
+                      Review requested
+                    </small>
+                  )}
                 </span>
                 <span className="attempt-status">
                   {attempt.mainAssessment
@@ -378,6 +391,12 @@ function Evidence({
               ? labels[mainResult.outcome]
               : "Not yet assessed"}
         </span>
+        {attempt.reviewRequest && (
+          <p className="review-request-note">
+            <b>Student asked for a check.</b>{" "}
+            {attempt.reviewRequest.note || "No note added."}
+          </p>
+        )}
         {edited(attempt, data) && (
           <span className="sample-tag edited-tag">
             Edited since this attempt. Results use the version the student saw.
