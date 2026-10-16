@@ -7,6 +7,7 @@ import {
 } from "../shared/contracts.js";
 import { isComplete } from "../shared/work-status.js";
 import { api, json } from "./api.js";
+import { workStatusView, statusFilters, type StatusFilter } from "./workStatus.js";
 import { go, href } from "./route.js";
 import {
   Confirm,
@@ -174,6 +175,7 @@ export function CoursePage({
   setContext: (text: string) => void;
 }) {
   const { courses, error, setError } = useCourses();
+  const [tab, setTab] = useState<"stream" | "work">("stream");
   const course = courses?.find((c) => c.id === courseId);
   useEffect(() => setContext(course?.title ?? ""), [course?.title, setContext]);
   async function leave() {
@@ -217,6 +219,25 @@ export function CoursePage({
         </div>
         <img src="/art/classroom.svg" alt="" />
       </section>
+      <div className="teacher-tabs" role="tablist">
+        <button
+          role="tab"
+          aria-selected={tab === "stream"}
+          onClick={() => setTab("stream")}
+        >
+          Stream
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "work"}
+          onClick={() => setTab("work")}
+        >
+          Your work
+        </button>
+      </div>
+      {tab === "work" ? (
+        <YourWork assignments={course.assignments} />
+      ) : (
       <div className="stream-grid">
         <aside className="card upcoming">
           <h2>Upcoming</h2>
@@ -260,7 +281,7 @@ export function CoursePage({
                     question or two
                   </span>
                 </span>
-                <StatusChip completed={isComplete(a.status)} />
+                <StatusChip status={a.status} dueDate={a.dueDate} />
               </a>
             );
           })}
@@ -291,6 +312,51 @@ export function CoursePage({
           </div>
         </div>
       </div>
+      )}
     </div>
+  );
+}
+
+function YourWork({ assignments }: { assignments: Card[] }) {
+  const [filter, setFilter] = useState<StatusFilter>("all"),
+    shown = assignments
+      .map((a) => ({ a, view: workStatusView(a.status, a.dueDate) }))
+      .filter(({ view }) => filter === "all" || view.tone === filter)
+      .toSorted((x, y) =>
+        (x.a.dueDate ?? "9999").localeCompare(y.a.dueDate ?? "9999"),
+      );
+  return (
+    <section className="work-list" aria-label="Your work">
+      <div className="filter-row" role="group" aria-label="Filter by status">
+        {statusFilters.map((f) => (
+          <button
+            key={f.id}
+            className="choice"
+            aria-pressed={filter === f.id}
+            onClick={() => setFilter(f.id)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+      {shown.length === 0 && (
+        <p className="card post fine-print">Nothing here right now.</p>
+      )}
+      {shown.map(({ a }) => (
+        <a
+          key={a.id}
+          className="card post post-assignment"
+          href={href({ kind: "assignment", assignmentId: a.id })}
+        >
+          <span className="post-body">
+            <span className="post-title">{a.title}</span>
+            <span className="post-meta">
+              {dueLabel(a.dueDate) ?? "Due when you're ready"}
+            </span>
+          </span>
+          <StatusChip status={a.status} dueDate={a.dueDate} />
+        </a>
+      ))}
+    </section>
   );
 }

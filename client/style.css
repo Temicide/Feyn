@@ -318,9 +318,52 @@ svg {
   border-radius: 999px;
   padding: 3px 12px;
 }
-.status-chip.done {
+.status-chip.approved {
   color: var(--done);
   background: var(--done-soft);
+}
+.status-chip.waiting {
+  color: #7a5200;
+  background: #fff6d9;
+}
+.status-chip.missing,
+.status-chip.not-approved {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.status-group {
+  flex: none;
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-row .choice[aria-pressed="true"] {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.work-list {
+  display: grid;
+  gap: 12px;
+}
+.status-explain {
+  font-size: 15px;
+}
+.review-request {
+  display: grid;
+  gap: 8px;
+}
+.review-request textarea {
+  min-height: 72px;
+}
+.status-detail {
+  font-size: 13px;
+  color: var(--ink-2);
 }
 .gold-star {
   display: flex;
