@@ -24,7 +24,7 @@ The student avatar's dialogue uses short verbatim excerpts relevant to the excha
 
 Dialogue uses a typewriter effect. The first click reveals the complete text in the current box, and the next click advances. A question pauses advancement and presents a record-answer control. The classroom, portrait, and dialogue box remain visible during recording. There is no response timer.
 
-Soft character blips accompany text as it appears. Revealing a complete line stops its blips. A clear mute control is available, and scene sounds pause while recording. Full spoken character dialogue belongs to a later phase.
+Soft character blips accompany text as it appears, as described in [Agreed character voice](#agreed-character-voice). Revealing a complete line stops its blips. A clear mute control is available, and scene sounds pause while recording. Full spoken character dialogue belongs to a later phase.
 
 The child has listening, thinking, puzzled, and aha portraits, with small gestures such as turning toward the board or nodding. The student avatar has speaking and waiting poses. The user accepted this expression set.
 
@@ -35,6 +35,20 @@ Within the scene, an explicit button starts recording a spoken follow-up respons
 Show animated dots in the student's black dialogue box as a thinking or mumbling moment while transcription or the child response is processing. Do not generate a substantive thought and put it into the student's mouth. Once transcription is ready, the reviewed ElevenLabs transcript supplies the student's dialogue and is used in the conversation with the child. The dots are presentation, not assessment evidence.
 
 Assessment of the current main explanation determines which ending type fits the exchange, while randomness selects an event within that type. A wrong follow-up does not by itself select an unsuccessful task ending. Randomness must not award or withhold demonstrated understanding. Previously earned completion persists during optional retries, even if a later attempt needs more work.
+
+## Agreed character voice
+
+Agreed on 16 October 2026. Dialogue follows the Undertale convention where typed text sounds like speech. Text types at about 35 ms per letter. Each letter or digit plays one short synthesized blip of about 40 ms. Spaces and punctuation stay silent, so the blips group into words.
+
+Punctuation adds a pause after it. A comma, semicolon, or colon pauses about 150 ms. A full stop, question mark, or exclamation mark pauses about 300 ms when it ends a sentence. Each dot of an ellipsis pauses about 250 ms. The child and student portraits move their mouths while a line types.
+
+Blips come from a synthesized tone rather than recorded voice files. Recorded voices are a later option if the synthesized tone sounds too much like beeping.
+
+Pip's voice changes subtly with expression while staying recognizably the same character. Aha is slightly higher and quicker. Puzzled is slightly lower with more wobble. Thinking is slower. Listening is the base voice. The child profile changes only the bounciness: playful varies pitch more between blips, and curious stays steadier. The student's excerpt lines use a separate voice, lower and quieter than Pip's, so the change of speaker is audible.
+
+The animated thinking dots are silent. Sound starts on at a soft volume. One mute preference covers the whole site and is remembered in the browser. Students who ask their device to reduce motion see each line in full at once and hear no blips.
+
+The voice also plays on the sign-in greeting, as an exception to keeping game presentation inside game moments. The exception covers sound only, and the sign-in page keeps its light style. Browsers block audio until the visitor clicks, so the greeting types silently on load. Tapping Pip or the speech bubble replays it with the voice. A short hint and a sound toggle sit beside the bubble.
 
 ## Agreed ending events and controls
 

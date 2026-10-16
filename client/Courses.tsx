@@ -5,7 +5,9 @@ import {
   studentCoursesSchema,
   type StudentCourse,
 } from "../shared/contracts.js";
+import { isComplete } from "../shared/work-status.js";
 import { api, json } from "./api.js";
+import { workStatusView, statusFilters, type StatusFilter } from "./workStatus.js";
 import { go, href } from "./route.js";
 import {
   Confirm,
@@ -21,7 +23,7 @@ type Card = StudentCourse["assignments"][number];
 
 function nextUp(course: StudentCourse): Card | undefined {
   return course.assignments
-    .filter((a) => !a.completedAt)
+    .filter((a) => !isComplete(a.status))
     .toSorted((a, b) =>
       (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"),
     )[0];
@@ -173,6 +175,7 @@ export function CoursePage({
   setContext: (text: string) => void;
 }) {
   const { courses, error, setError } = useCourses();
+  const [tab, setTab] = useState<"stream" | "work">("stream");
   const course = courses?.find((c) => c.id === courseId);
   useEffect(() => setContext(course?.title ?? ""), [course?.title, setContext]);
   async function leave() {
@@ -202,7 +205,7 @@ export function CoursePage({
       </div>
     );
   const upcoming = course.assignments
-    .filter((a) => !a.completedAt)
+    .filter((a) => !isComplete(a.status))
     .toSorted((a, b) =>
       (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"),
     );
@@ -216,80 +219,144 @@ export function CoursePage({
         </div>
         <img src="/art/classroom.svg" alt="" />
       </section>
-      <div className="stream-grid">
-        <aside className="card upcoming">
-          <h2>Upcoming</h2>
-          {upcoming.length === 0 ? (
-            <p className="fine-print">Nothing due right now.</p>
-          ) : (
-            upcoming.slice(0, 3).map((a) => (
-              <a
-                key={a.id}
-                className="upcoming-item"
-                href={href({ kind: "assignment", assignmentId: a.id })}
-              >
-                <span>{dueLabel(a.dueDate) ?? "Due when you're ready"}</span>
-                {a.title}
-              </a>
-            ))
-          )}
-        </aside>
-        <div className="stream-posts">
-          {course.assignments.length === 0 && (
-            <p className="card post fine-print">
-              Nothing posted yet. New assignments from your teacher will show
-              up here.
-            </p>
-          )}
-          {course.assignments.map((a) => {
-            const due = dueLabel(a.dueDate);
-            return (
-              <a
-                key={a.id}
-                className="card post post-assignment"
-                href={href({ kind: "assignment", assignmentId: a.id })}
-              >
-                <span className="post-icon" aria-hidden="true">
-                  <Sparkle />
-                </span>
-                <span className="post-body">
-                  <span className="post-title">New assignment: {a.title}</span>
-                  <span className="post-meta">
-                    {due ? `${due} · ` : ""}Teach Pip out loud, then answer a
-                    question or two
-                  </span>
-                </span>
-                <StatusChip completed={Boolean(a.completedAt)} />
-              </a>
-            );
-          })}
-          <article className="card post">
-            <img
-              className="pixel-avatar"
-              src="/art/child-puzzled.png"
-              alt=""
-            />
-            <div className="post-body">
-              <p className="post-title">Pip</p>
-              <p className="bubble">
-                I'm ready to learn! Explain it to me like I've never heard of
-                it, and I'll ask you about the tricky parts.
+      <div className="teacher-tabs" role="tablist">
+        <button
+          role="tab"
+          aria-selected={tab === "stream"}
+          onClick={() => setTab("stream")}
+        >
+          Stream
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "work"}
+          onClick={() => setTab("work")}
+        >
+          Your work
+        </button>
+      </div>
+      {tab === "work" ? (
+        <YourWork assignments={course.assignments} />
+      ) : (
+        <div className="stream-grid">
+          <aside className="card upcoming">
+            <h2>Upcoming</h2>
+            {upcoming.length === 0 ? (
+              <p className="fine-print">Nothing due right now.</p>
+            ) : (
+              upcoming.slice(0, 3).map((a) => (
+                <a
+                  key={a.id}
+                  className="upcoming-item"
+                  href={href({ kind: "assignment", assignmentId: a.id })}
+                >
+                  <span>{dueLabel(a.dueDate) ?? "Due when you're ready"}</span>
+                  {a.title}
+                </a>
+              ))
+            )}
+          </aside>
+          <div className="stream-posts">
+            {course.assignments.length === 0 && (
+              <p className="card post fine-print">
+                Nothing posted yet. New assignments from your teacher will show
+                up here.
               </p>
+            )}
+            {course.assignments.map((a) => {
+              const due = dueLabel(a.dueDate);
+              return (
+                <a
+                  key={a.id}
+                  className="card post post-assignment"
+                  href={href({ kind: "assignment", assignmentId: a.id })}
+                >
+                  <span className="post-icon" aria-hidden="true">
+                    <Sparkle />
+                  </span>
+                  <span className="post-body">
+                    <span className="post-title">New assignment: {a.title}</span>
+                    <span className="post-meta">
+                      {due ? `${due} · ` : ""}Teach Pip out loud, then answer a
+                      question or two
+                    </span>
+                  </span>
+                  <StatusChip status={a.status} dueDate={a.dueDate} />
+                </a>
+              );
+            })}
+            <article className="card post">
+              <img
+                className="pixel-avatar"
+                src="/art/child-puzzled.png"
+                alt=""
+              />
+              <div className="post-body">
+                <p className="post-title">Pip</p>
+                <p className="bubble">
+                  I'm ready to learn! Explain it to me like I've never heard of
+                  it, and I'll ask you about the tricky parts.
+                </p>
+              </div>
+            </article>
+            <div className="course-actions">
+              <Confirm
+                label="Leave course"
+                question="Leave this course?"
+                confirmLabel="Leave course"
+                onConfirm={leave}
+              >
+                Your work is kept. Join again with the code to pick up where you
+                left off.
+              </Confirm>
             </div>
-          </article>
-          <div className="course-actions">
-            <Confirm
-              label="Leave course"
-              question="Leave this course?"
-              confirmLabel="Leave course"
-              onConfirm={leave}
-            >
-              Your work is kept. Join again with the code to pick up where you
-              left off.
-            </Confirm>
           </div>
         </div>
-      </div>
+      )}
     </div>
+  );
+}
+
+function YourWork({ assignments }: { assignments: Card[] }) {
+  const [filter, setFilter] = useState<StatusFilter>("all"),
+    shown = assignments
+      .map((a) => ({ a, view: workStatusView(a.status, a.dueDate) }))
+      .filter(({ view }) => filter === "all" || view.tone === filter)
+      .toSorted((x, y) =>
+        (x.a.dueDate ?? "9999").localeCompare(y.a.dueDate ?? "9999"),
+      );
+  return (
+    <section className="work-list" aria-label="Your work">
+      <div className="filter-row" role="group" aria-label="Filter by status">
+        {statusFilters.map((f) => (
+          <button
+            key={f.id}
+            className="choice"
+            aria-pressed={filter === f.id}
+            onClick={() => setFilter(f.id)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+      {shown.length === 0 && (
+        <p className="card post fine-print">Nothing here right now.</p>
+      )}
+      {shown.map(({ a }) => (
+        <a
+          key={a.id}
+          className="card post post-assignment"
+          href={href({ kind: "assignment", assignmentId: a.id })}
+        >
+          <span className="post-body">
+            <span className="post-title">{a.title}</span>
+            <span className="post-meta">
+              {dueLabel(a.dueDate) ?? "Due when you're ready"}
+            </span>
+          </span>
+          <StatusChip status={a.status} dueDate={a.dueDate} />
+        </a>
+      ))}
+    </section>
   );
 }

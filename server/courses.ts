@@ -7,6 +7,7 @@ import {
   type StudentCourse,
   type TeacherCourse,
 } from "../shared/contracts.js";
+import { isComplete, workStatus } from "../shared/work-status.js";
 import { projectRecap } from "./attempts.js";
 import { HttpError } from "./auth.js";
 import { applyInput, rubricOf } from "./rubric.js";
@@ -157,11 +158,11 @@ export class Courses {
     return (await this.activeEnrollments({ courseId })).map((e) => e.learnerId);
   }
   async studentCourses(learnerId: string): Promise<StudentCourse[]> {
-    const [enrollments, courses, assignments, completions] = await Promise.all([
+    const [enrollments, courses, assignments, attempts] = await Promise.all([
       this.activeEnrollments({ learnerId }),
       this.list("course"),
       this.list("assignment"),
-      this.list("completion"),
+      this.list("attempt"),
     ]);
     return enrollments.flatMap((e) => {
       const course = courses.find((c) => c.id === e.courseId);
@@ -176,10 +177,11 @@ export class Courses {
               id: a.id,
               title: a.title,
               dueDate: a.dueDate,
-              completedAt:
-                completions.find(
-                  (c) => c.learnerId === learnerId && c.assignmentId === a.id,
-                )?.at ?? null,
+              status: workStatus(
+                attempts.filter(
+                  (t) => t.learnerId === learnerId && t.assignmentId === a.id,
+                ),
+              ),
             })),
         },
       ];
@@ -207,13 +209,12 @@ export class Courses {
     return { assignment, course };
   }
   async teacherCourse(course: Course): Promise<TeacherCourse> {
-    const [enrollments, learners, assignments, attempts, completions] =
+    const [enrollments, learners, assignments, attempts] =
       await Promise.all([
         this.activeEnrollments({ courseId: course.id }),
         this.list("learner"),
         this.list("assignment"),
         this.list("attempt"),
-        this.list("completion"),
       ]);
     const rosterIds = enrollments.map((e) => e.learnerId),
       roster = learners.filter((l) => rosterIds.includes(l.id));
@@ -226,20 +227,28 @@ export class Courses {
       })),
       assignments: assignments
         .filter((a) => a.courseId === course.id)
-        .map((a) => ({
-          id: a.id,
-          title: a.title,
-          state: a.state,
-          locked: a.locked,
-          dueDate: a.dueDate,
-          enrolled: rosterIds.length,
-          completed: completions.filter(
-            (c) => c.assignmentId === a.id && rosterIds.includes(c.learnerId),
-          ).length,
-          gapConcepts: projectRecap(a, roster, attempts).filter(
-            (row) => row.gaps.length > 0,
-          ).length,
-        })),
+        .map((a) => {
+          const statuses = rosterIds.map((learnerId) =>
+            workStatus(
+              attempts.filter(
+                (t) => t.learnerId === learnerId && t.assignmentId === a.id,
+              ),
+            ),
+          );
+          return {
+            id: a.id,
+            title: a.title,
+            state: a.state,
+            locked: a.locked,
+            dueDate: a.dueDate,
+            enrolled: rosterIds.length,
+            completed: statuses.filter(isComplete).length,
+            waiting: statuses.filter((s) => s.kind === "waiting").length,
+            gapConcepts: projectRecap(a, roster, attempts).filter(
+              (row) => row.gaps.length > 0,
+            ).length,
+          };
+        }),
     };
   }
   async createDraft(course: Course): Promise<Assignment> {
