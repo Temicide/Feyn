@@ -45,7 +45,7 @@ async function lessonFlow(records: () => RecordStore) {
   await courses.join(learner.id, "FEYN01");
   const attempt = await store.create(learner.id, assignment.id, false, false);
   const bytes = Buffer.from("original recording bytes");
-  await records().putAudio("rec-1", bytes, "audio/wav");
+  await records().putFile("audio", "rec-1", bytes, "audio/wav");
   const answer = await store.addAnswer(
     attempt.id,
     "main",
@@ -84,24 +84,30 @@ async function lessonFlow(records: () => RecordStore) {
   );
   const ada = teacher.learners.find((l) => l.id === learner.id);
   assert.equal(ada?.name, "Ada L.");
-  assert.ok(
-    await reopened.store.completion(learner.id, assignment.id),
-    "completion survives a renamed sign-in",
+  assert.equal(
+    (await reopened.store.workStatus(learner.id, assignment.id)).kind,
+    "waiting",
+    "work status survives a renamed sign-in",
   );
   assert.equal(
     teacher.attempts.filter((a) => a.learnerId === "sample-eli").length,
     2,
     "sample classmates are seeded once per database",
   );
+  assert.notEqual(
+    (await reopened.store.workStatus("sample-eli", assignment.id)).kind,
+    "none",
+    "seeded classmates' work counts toward the class",
+  );
   assert.ok(
     teacher.recap
       .find((c) => c.id === interval)
       ?.demonstrated.includes(learner.id),
   );
-  const saved = await records().getAudio("rec-1");
+  const saved = await records().getFile("audio", "rec-1");
   assert.equal(saved?.mime, "audio/wav");
   assert.ok(saved?.bytes.equals(bytes), "original audio bytes round trip");
-  assert.equal(await records().getAudio("missing"), null);
+  assert.equal(await records().getFile("audio", "missing"), null);
 }
 
 test("lesson flow persists through the in-memory store", async () => {

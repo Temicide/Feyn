@@ -4,9 +4,12 @@ import {
   type AssignmentInput,
   type Course,
   type Enrollment,
+  type Post,
+  type PostImage,
   type StudentCourse,
   type TeacherCourse,
 } from "../shared/contracts.js";
+import { isComplete, workStatus } from "../shared/work-status.js";
 import { projectRecap } from "./attempts.js";
 import { HttpError } from "./auth.js";
 import { applyInput, rubricOf } from "./rubric.js";
@@ -24,6 +27,12 @@ export function normalizeEmail(email: string): string {
 }
 export function enrollmentId(courseId: string, learnerId: string): string {
   return `${courseId}:${learnerId}`;
+}
+
+function visiblePosts(posts: Post[], courseId: string): Post[] {
+  return posts
+    .filter((p) => p.courseId === courseId && !p.removedAt)
+    .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function completenessProblem(a: Assignment): string | null {
@@ -157,11 +166,12 @@ export class Courses {
     return (await this.activeEnrollments({ courseId })).map((e) => e.learnerId);
   }
   async studentCourses(learnerId: string): Promise<StudentCourse[]> {
-    const [enrollments, courses, assignments, completions] = await Promise.all([
+    const [enrollments, courses, assignments, attempts, posts] = await Promise.all([
       this.activeEnrollments({ learnerId }),
       this.list("course"),
       this.list("assignment"),
-      this.list("completion"),
+      this.list("attempt"),
+      this.list("post"),
     ]);
     return enrollments.flatMap((e) => {
       const course = courses.find((c) => c.id === e.courseId);
@@ -170,20 +180,32 @@ export class Courses {
         {
           id: course.id,
           title: course.title,
+          posts: visiblePosts(posts, course.id),
           assignments: assignments
             .filter((a) => a.courseId === course.id && a.state === "posted")
             .map((a) => ({
               id: a.id,
               title: a.title,
               dueDate: a.dueDate,
-              completedAt:
-                completions.find(
-                  (c) => c.learnerId === learnerId && c.assignmentId === a.id,
-                )?.at ?? null,
+              status: workStatus(
+                attempts.filter(
+                  (t) => t.learnerId === learnerId && t.assignmentId === a.id,
+                ),
+              ),
             })),
         },
       ];
     });
+  }
+  async member(
+    learner: { id: string; email: string },
+    course: Course,
+  ): Promise<boolean> {
+    return (
+      course.teacherId === normalizeEmail(learner.email) ||
+      (await this.activeEnrollments({ learnerId: learner.id, courseId: course.id }))
+        .length > 0
+    );
   }
   async takeable(
     learner: { id: string; email: string },
@@ -197,23 +219,19 @@ export class Courses {
       assignment &&
       course &&
       assignment.state === "posted" &&
-      (course.teacherId === normalizeEmail(learner.email) ||
-        (await this.activeEnrollments({
-          learnerId: learner.id,
-          courseId: course.id,
-        })).length > 0);
+      (await this.member(learner, course));
     if (!assignment || !course || !allowed)
       throw new HttpError(404, "Assignment not found.");
     return { assignment, course };
   }
   async teacherCourse(course: Course): Promise<TeacherCourse> {
-    const [enrollments, learners, assignments, attempts, completions] =
+    const [enrollments, learners, assignments, attempts, posts] =
       await Promise.all([
         this.activeEnrollments({ courseId: course.id }),
         this.list("learner"),
         this.list("assignment"),
         this.list("attempt"),
-        this.list("completion"),
+        this.list("post"),
       ]);
     const rosterIds = enrollments.map((e) => e.learnerId),
       roster = learners.filter((l) => rosterIds.includes(l.id));
@@ -224,22 +242,31 @@ export class Courses {
         name: learners.find((l) => l.id === e.learnerId)?.name ?? e.learnerId,
         joinedAt: e.joinedAt,
       })),
+      posts: visiblePosts(posts, course.id),
       assignments: assignments
         .filter((a) => a.courseId === course.id)
-        .map((a) => ({
-          id: a.id,
-          title: a.title,
-          state: a.state,
-          locked: a.locked,
-          dueDate: a.dueDate,
-          enrolled: rosterIds.length,
-          completed: completions.filter(
-            (c) => c.assignmentId === a.id && rosterIds.includes(c.learnerId),
-          ).length,
-          gapConcepts: projectRecap(a, roster, attempts).filter(
-            (row) => row.gaps.length > 0,
-          ).length,
-        })),
+        .map((a) => {
+          const statuses = rosterIds.map((learnerId) =>
+            workStatus(
+              attempts.filter(
+                (t) => t.learnerId === learnerId && t.assignmentId === a.id,
+              ),
+            ),
+          );
+          return {
+            id: a.id,
+            title: a.title,
+            state: a.state,
+            locked: a.locked,
+            dueDate: a.dueDate,
+            enrolled: rosterIds.length,
+            completed: statuses.filter(isComplete).length,
+            waiting: statuses.filter((s) => s.kind === "waiting").length,
+            gapConcepts: projectRecap(a, roster, attempts).filter(
+              (row) => row.gaps.length > 0,
+            ).length,
+          };
+        }),
     };
   }
   async createDraft(course: Course): Promise<Assignment> {
@@ -294,5 +321,45 @@ export class Courses {
     const unlocked = { ...current, locked: false };
     await this.store.put("assignment", unlocked);
     return unlocked;
+  }
+  async findPost(id: string): Promise<Post> {
+    const found = (await this.list("post")).find((p) => p.id === id && !p.removedAt);
+    if (!found) throw new HttpError(404, "Post not found.");
+    return found;
+  }
+  async createPost(
+    course: Course,
+    id: string,
+    text: string,
+    images: PostImage[],
+  ): Promise<Post> {
+    if (!text && images.length === 0)
+      throw new HttpError(400, "Write something or add a picture.");
+    const post: Post = {
+      id,
+      courseId: course.id,
+      text,
+      images,
+      createdAt: new Date().toISOString(),
+      removedAt: null,
+    };
+    await this.store.put("post", post);
+    return post;
+  }
+  async removePost(post: Post): Promise<void> {
+    await this.store.put("post", { ...post, removedAt: new Date().toISOString() });
+  }
+  async welcome(courseId: string, learnerId: string, email: string): Promise<void> {
+    const course = (await this.list("course")).find((c) => c.id === courseId);
+    if (!course || course.teacherId === normalizeEmail(email)) return;
+    const id = enrollmentId(course.id, learnerId);
+    if ((await this.list("enrollment")).some((e) => e.id === id)) return;
+    await this.store.put("enrollment", {
+      id,
+      courseId: course.id,
+      learnerId,
+      joinedAt: new Date().toISOString(),
+      endedAt: null,
+    });
   }
 }

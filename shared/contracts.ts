@@ -137,9 +137,32 @@ export const attemptSchema = z.object({
     }),
   ),
   reviews: z.array(reviewSchema),
+  reviewRequest: z
+    .object({ at: z.string(), note: z.string().max(300) })
+    .nullable()
+    .default(null),
   endingVariant: z.number().int().min(0).max(1),
 });
 export type Attempt = z.infer<typeof attemptSchema>;
+const workStatusBase = { attemptId: z.string(), turnedInAt: z.string(), canRequestReview: z.boolean() };
+export const workStatusSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none") }),
+  z.object({
+    kind: z.literal("waiting"),
+    reason: z.enum(["pip-passed", "requested"]),
+    ...workStatusBase,
+  }),
+  z.object({ kind: z.literal("approved"), ...workStatusBase }),
+  z.object({
+    kind: z.literal("not-approved"),
+    by: z.enum(["pip", "teacher"]),
+    ...workStatusBase,
+  }),
+]);
+export type WorkStatus = z.infer<typeof workStatusSchema>;
+export const reviewRequestInputSchema = z.object({
+  note: z.string().trim().max(300),
+});
 export const learnerSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -154,6 +177,34 @@ export const courseSchema = z.object({
   createdAt: z.string(),
 });
 export type Course = z.infer<typeof courseSchema>;
+export const postImageMimes = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+export const maxPostImages = 4;
+export const maxPostImageBytes = 1024 * 1024;
+export const postImageSchema = z.discriminatedUnion("source", [
+  z.object({
+    source: z.literal("upload"),
+    id: z.string().uuid(),
+    mime: z.enum(postImageMimes),
+  }),
+  z.object({
+    source: z.literal("bundled"),
+    path: z.string().regex(/^\/art\/[\w-]+\.(png|svg)$/),
+  }),
+]);
+export type PostImage = z.infer<typeof postImageSchema>;
+export const postSchema = z.object({
+  id: z.string(),
+  courseId: z.string(),
+  text: z.string().max(5000),
+  images: z.array(postImageSchema).max(maxPostImages),
+  createdAt: z.string(),
+  removedAt: z.string().nullable(),
+});
+export type Post = z.infer<typeof postSchema>;
+export const postTextSchema = z
+  .string()
+  .transform((text) => text.replace(/\r\n?/g, "\n"))
+  .pipe(z.string().trim().max(5000));
 export const enrollmentSchema = z.object({
   id: z.string(),
   courseId: z.string(),
@@ -180,13 +231,6 @@ export const teacherEmailSchema = z.object({
   addedAt: z.string(),
 });
 export type TeacherEmail = z.infer<typeof teacherEmailSchema>;
-export const completionSchema = z.object({
-  id: z.string(),
-  learnerId: z.string(),
-  assignmentId: z.string(),
-  at: z.string(),
-});
-export type Completion = z.infer<typeof completionSchema>;
 
 export const assignmentInputSchema = z.object({
   title: looseText(120),
@@ -253,11 +297,12 @@ const assignmentCardSchema = z.object({
   id: z.string(),
   title: z.string(),
   dueDate: z.string().nullable(),
-  completedAt: z.string().nullable(),
+  status: workStatusSchema,
 });
 export const studentCourseSchema = z.object({
   id: z.string(),
   title: z.string(),
+  posts: z.array(postSchema),
   assignments: z.array(assignmentCardSchema),
 });
 export type StudentCourse = z.infer<typeof studentCourseSchema>;
@@ -266,7 +311,7 @@ export const bootstrapSchema = z.object({
   assignment: assignmentSchema,
   courseTitle: z.string(),
   learner: learnerSchema,
-  completedAt: z.string().nullable(),
+  status: workStatusSchema,
   attempts: z.array(attemptSchema),
   providers: z.object({
     transcription: z.boolean(),
@@ -283,6 +328,7 @@ const teacherAssignmentCardSchema = z.object({
   dueDate: z.string().nullable(),
   enrolled: z.number().int(),
   completed: z.number().int(),
+  waiting: z.number().int(),
   gapConcepts: z.number().int(),
 });
 export const teacherCourseSchema = z.object({
@@ -290,6 +336,7 @@ export const teacherCourseSchema = z.object({
   roster: z.array(
     z.object({ learnerId: z.string(), name: z.string(), joinedAt: z.string() }),
   ),
+  posts: z.array(postSchema),
   assignments: z.array(teacherAssignmentCardSchema),
 });
 export type TeacherCourse = z.infer<typeof teacherCourseSchema>;

@@ -7,6 +7,8 @@ import {
   type Bootstrap,
   type Me,
 } from "../shared/contracts.js";
+import { attemptStanding, isComplete } from "../shared/work-status.js";
+import { standingView, workStatusView } from "./workStatus.js";
 import { api, json } from "./api.js";
 import { Recorder } from "./Recorder.js";
 import { go, href } from "./route.js";
@@ -138,9 +140,15 @@ export function AssignmentPage({
       <Loading text="Opening the assignment" />
     );
   const { assignment } = bootstrap,
-    completed = Boolean(bootstrap.completedAt),
-    due = dueLabel(assignment.dueDate),
-    passed = (attempt: Attempt) => attempt.mainAssessment?.outcome === "pass";
+    completed = isComplete(bootstrap.status),
+    due = dueLabel(assignment.dueDate);
+  const standing = stage.kind === "finished" ? attemptStanding(stage.attempt) : null,
+    standingText = standing ? standingView(standing).explain : "";
+  const positive = standing?.kind !== "not-approved",
+    finishTitle = standing?.kind === "not-approved" ? "Saved for next time" : "Explanation turned in",
+    finishBody = stage.kind === "finished" && stage.attempt.sample
+      ? "Sample walkthroughs show how it works and don't count toward your work status."
+      : `${standingText} Pip's example questions stay in your learning history.`;
   return (
     <>
       <ErrorBanner error={error} onDismiss={() => setError("")} />
@@ -204,14 +212,20 @@ export function AssignmentPage({
           <aside className="card your-work">
             <div className="your-work-head">
               <h2>Your work</h2>
-              <StatusChip completed={completed} />
+              <StatusChip status={bootstrap.status} dueDate={assignment.dueDate} />
             </div>
             {due && <p className="fine-print">{due}</p>}
-            {completed && (
-              <p className="gold-star">
-                Completed. Practising again keeps your completion.
-              </p>
-            )}
+            <p className="status-explain">
+              {workStatusView(bootstrap.status, assignment.dueDate).explain}
+            </p>
+            {bootstrap.status.kind !== "none" &&
+              bootstrap.status.canRequestReview && (
+                <RequestReview
+                  attemptId={bootstrap.status.attemptId}
+                  onSent={load}
+                  onError={setError}
+                />
+              )}
             {bootstrap.attempts.length > 0 && (
               <label className="check">
                 <input
@@ -315,25 +329,17 @@ export function AssignmentPage({
         <section className="card finished" aria-labelledby="finished-title">
           <img
             className="pixel-avatar pixel-avatar-lg"
-            src={`/art/child-${passed(stage.attempt) ? "aha" : "listening"}.png`}
+            src={`/art/child-${positive ? "aha" : "listening"}.png`}
             alt=""
           />
-          {passed(stage.attempt) && (
+          {positive && (
             <span className="reward" aria-hidden="true">
               <Sparkle />
             </span>
           )}
-          <h1 id="finished-title">
-            {passed(stage.attempt) ? "Explanation complete" : "Saved for next time"}
-          </h1>
-          <p>
-            {passed(stage.attempt)
-              ? stage.attempt.sample
-                ? "The sample explanation met the criteria. Sample walkthroughs show how it works and don't count toward your own completion."
-                : "Your main explanation earned completion. Pip's example questions stay in your learning history."
-              : "Your explanation and answers are saved. Review the idea and teach Pip again whenever you're ready."}
-          </p>
-          {completed && !passed(stage.attempt) && (
+          <h1 id="finished-title">{finishTitle}</h1>
+          <p>{finishBody}</p>
+          {completed && standing?.kind === "not-approved" && (
             <p className="gold-star">Your earlier completion is still yours.</p>
           )}
           <div className="choices">
@@ -361,5 +367,60 @@ export function AssignmentPage({
         </section>
       )}
     </>
+  );
+}
+
+function RequestReview({
+  attemptId,
+  onSent,
+  onError,
+}: {
+  attemptId: string;
+  onSent: () => Promise<unknown>;
+  onError: (message: string) => void;
+}) {
+  const [open, setOpen] = useState(false),
+    [note, setNote] = useState(""),
+    [busy, setBusy] = useState(false);
+  if (!open)
+    return (
+      <button className="choice choice-wide" onClick={() => setOpen(true)}>
+        Ask my teacher to check
+      </button>
+    );
+  async function send() {
+    setBusy(true);
+    onError("");
+    try {
+      await api(
+        `/attempts/${attemptId}/review-request`,
+        attemptSchema,
+        json("POST", { note }),
+      );
+      await onSent();
+    } catch (e) {
+      onError(failure(e, "Could not send your request."));
+      setBusy(false);
+    }
+  }
+  return (
+    <form
+      className="review-request"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void send();
+      }}
+    >
+      <label htmlFor="review-note">Add a note for your teacher (optional)</label>
+      <textarea
+        id="review-note"
+        value={note}
+        maxLength={300}
+        onChange={(event) => setNote(event.target.value)}
+      />
+      <button className="choice choice-primary choice-wide" disabled={busy}>
+        {busy ? "Sending" : "Send to my teacher"}
+      </button>
+    </form>
   );
 }

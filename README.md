@@ -29,7 +29,7 @@ With `DEV_LOGIN=1`, the sign-in page offers local test accounts and needs no Goo
 2. Sign in with any other email to act as a student. Enter the join code `FEYN01` under **Join a course**.
 3. Open the assignment and select **Try the sample walkthrough**. This needs no microphone and no provider keys.
 
-A fresh database holds one demo course, **Calculus 1 · Rates of change**.
+A fresh database holds two courses. **Calculus 1 · Rates of change** is the demo course. **Let's get started** (join code `HELLO1`) is a tutorial that explains Feyn to new students.
 
 Without `MONGODB_URI`, records stay in memory and disappear when the API restarts.
 

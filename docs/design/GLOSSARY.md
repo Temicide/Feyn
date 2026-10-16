@@ -58,7 +58,26 @@ A student's spoken answer to a diagnostic question within the current teaching s
 The student's initial teaching of the assigned topic, assessed against the assignment's explanation criteria.
 
 **Task completion**:
-The status awarded when the main explanation meets its criteria and preserved during optional retries. Incorrect follow-ups and weaker retry responses remain visible to the teacher without independently blocking or removing this status.
+The status awarded when the main explanation meets its criteria and preserved during optional retries. Incorrect follow-ups and weaker retry responses remain visible to the teacher without independently blocking or removing this status. It is held while any of the student's own attempts passes once teacher reviews are applied, so a teacher review can remove it.
+
+**Turned in**:
+What happens to a student's work when a main explanation is submitted and assessed, whatever the outcome. Finishing the follow-up questions is not required.
+_Avoid_: Finished, submitted scene
+
+**Work status**:
+What a student sees about one assignment: Assigned (nothing turned in, not yet past due), Missing (nothing turned in after the due date has ended in the student's own timezone), Waiting for review, Approved, or Not approved. The student's best current attempt sets it, ranking Approved above Waiting for review above Not approved. Approved and Not approved say whether the bot assessment or a teacher decided. Work first turned in after its due date also reads "Done late". A teacher review changes it as soon as it is saved. Sample walkthroughs never change it. Students see whether work is approved or not, never per-concept results or a score.
+_Avoid_: Grade, score
+
+**Waiting for review**:
+The work status when the bot assessment passed the main explanation, or the student sent a review request, and no teacher has reviewed it yet. A bot pass already earns task completion; a teacher review confirms it as Approved or overturns it.
+
+**Not approved**:
+The work status when the main explanation did not pass, either by the bot assessment or by a teacher review. It invites another try and is not a support flag.
+_Avoid_: Failed, rejected
+
+**Review request**:
+A student's request that a teacher review an explanation attempt the bot assessment did not pass, because the student believes the explanation was correct and clear for the novice character. A student can send one, with an optional short note, on the attempt that currently sets their work status, and not after a teacher has reviewed that attempt.
+_Avoid_: Appeal, complaint
 
 **Bot assessment**:
 The bot's proposed interpretation of an explanation attempt, supported by the student's words and follow-up responses. The human teacher can accept or correct it and retains final judgment.

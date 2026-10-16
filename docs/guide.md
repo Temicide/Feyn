@@ -16,7 +16,7 @@ Live recording and audio upload use ElevenLabs batch speech recognition with `sc
 
 Use **Enter the classroom** to record through the microphone or upload an existing audio recording. Recordings and uploads are limited to 4 MB because Vercel limits request bodies to 4.5 MB. The microphone records at 32 kbps, so 4 MB holds about 15 minutes of speech. Upload sends the actual audio to ElevenLabs. It does not accept a typed explanation. Review the transcript, optionally replace up to three individual words, then select **Send to Pip**. Submitted evidence is immutable. Larger changes require a new recording.
 
-The first application question is required. The second is optional. A correct main explanation earns completion independently of either diagnostic answer. Later practice can update the current evidence without removing earned completion.
+The first application question is required. The second is optional. A correct main explanation earns completion independently of either diagnostic answer. Later practice can update the current evidence without removing completion. A teacher review can remove it when no passing attempt remains.
 
 Provider setup and request failures remain operational errors. An unreachable provider is named in the error message. A missing key never creates a transcript or a conceptual-failure assessment. The original uploaded recording remains saved when transcription fails, and **Retry transcription** can process it after setup is repaired.
 
@@ -58,7 +58,7 @@ The read tools are `list_courses`, `get_assignment`, `get_class_recap`, `list_at
 
 ## Data and limits
 
-MongoDB holds one collection each for learners, courses, enrollments, assignments, teachers, completions, attempts, and answers, plus `settings`, `counters`, and the GridFS bucket `audio` for original recordings. Browser reloads retain earned completion and teacher evidence. An unfinished scene's presentation position is not restored after reload.
+MongoDB holds one collection each for learners, courses, enrollments, assignments, teachers, attempts, and answers, plus `settings`, `counters`, and the GridFS bucket `audio` for original recordings. Browser reloads retain work status and teacher evidence. An unfinished scene's presentation position is not restored after reload.
 
 Every request reads whole collections, which suits a demo but not a large school. Attempts saved before courses existed have no assignment and fail validation, so use a fresh database name such as `MONGODB_DB=feyn-courses` instead of migrating.
 

@@ -107,19 +107,14 @@ export function pauseAfter(text: string, index: number): number {
   return pause;
 }
 
-const reducedMotion = () =>
-  matchMedia("(prefers-reduced-motion: reduce)").matches;
 export function useTypewriter(text: string, voice: Voice) {
-  const [state, setState] = useState(() => ({
-      text,
-      shown: reducedMotion() ? text.length : 0,
-    })),
+  const [state, setState] = useState(() => ({ text, shown: 0 })),
     voiceRef = useRef(voice);
   useEffect(() => {
     voiceRef.current = voice;
   });
   if (state.text !== text)
-    setState({ text, shown: reducedMotion() ? text.length : 0 });
+    setState({ text, shown: 0 });
   const { shown } = state;
   useEffect(() => {
     if (shown >= text.length) return;
