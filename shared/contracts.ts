@@ -177,6 +177,34 @@ export const courseSchema = z.object({
   createdAt: z.string(),
 });
 export type Course = z.infer<typeof courseSchema>;
+export const postImageMimes = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+export const maxPostImages = 4;
+export const maxPostImageBytes = 1024 * 1024;
+export const postImageSchema = z.discriminatedUnion("source", [
+  z.object({
+    source: z.literal("upload"),
+    id: z.string().uuid(),
+    mime: z.enum(postImageMimes),
+  }),
+  z.object({
+    source: z.literal("bundled"),
+    path: z.string().regex(/^\/art\/[\w-]+\.(png|svg)$/),
+  }),
+]);
+export type PostImage = z.infer<typeof postImageSchema>;
+export const postSchema = z.object({
+  id: z.string(),
+  courseId: z.string(),
+  text: z.string().max(5000),
+  images: z.array(postImageSchema).max(maxPostImages),
+  createdAt: z.string(),
+  removedAt: z.string().nullable(),
+});
+export type Post = z.infer<typeof postSchema>;
+export const postTextSchema = z
+  .string()
+  .transform((text) => text.replace(/\r\n?/g, "\n"))
+  .pipe(z.string().trim().max(5000));
 export const enrollmentSchema = z.object({
   id: z.string(),
   courseId: z.string(),
@@ -274,6 +302,7 @@ const assignmentCardSchema = z.object({
 export const studentCourseSchema = z.object({
   id: z.string(),
   title: z.string(),
+  posts: z.array(postSchema),
   assignments: z.array(assignmentCardSchema),
 });
 export type StudentCourse = z.infer<typeof studentCourseSchema>;
@@ -307,6 +336,7 @@ export const teacherCourseSchema = z.object({
   roster: z.array(
     z.object({ learnerId: z.string(), name: z.string(), joinedAt: z.string() }),
   ),
+  posts: z.array(postSchema),
   assignments: z.array(teacherAssignmentCardSchema),
 });
 export type TeacherCourse = z.infer<typeof teacherCourseSchema>;

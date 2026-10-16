@@ -6,6 +6,7 @@ import {
   courseSchema,
   enrollmentSchema,
   learnerSchema,
+  postSchema,
   teacherEmailSchema,
   type Answer,
   type Assignment,
@@ -13,6 +14,7 @@ import {
   type Course,
   type Enrollment,
   type Learner,
+  type Post,
   type TeacherEmail,
 } from "../shared/contracts.js";
 
@@ -24,16 +26,18 @@ export type Records = {
   enrollment: Enrollment;
   assignment: Assignment;
   teacher: TeacherEmail;
+  post: Post;
 };
 export type Kind = keyof Records;
-export type Audio = { bytes: Buffer; mime: string };
+export type Bucket = "audio" | "image";
+export type StoredFile = { bytes: Buffer; mime: string };
 export interface RecordStore {
   list<K extends Kind>(kind: K): Promise<Records[K][]>;
   put<K extends Kind>(kind: K, value: Records[K]): Promise<void>;
   getSetting(key: string): Promise<string | null>;
   setSetting(key: string, value: string): Promise<void>;
-  putAudio(id: string, bytes: Buffer, mime: string): Promise<void>;
-  getAudio(id: string): Promise<Audio | null>;
+  putFile(bucket: Bucket, id: string, bytes: Buffer, mime: string): Promise<void>;
+  getFile(bucket: Bucket, id: string): Promise<StoredFile | null>;
 }
 
 export class MemoryStore implements RecordStore {
@@ -45,9 +49,10 @@ export class MemoryStore implements RecordStore {
     enrollment: new Map(),
     assignment: new Map(),
     teacher: new Map(),
+    post: new Map(),
   };
   private settings = new Map<string, string>();
-  private audio = new Map<string, Audio>();
+  private files = new Map<string, StoredFile>();
   async list<K extends Kind>(kind: K): Promise<Records[K][]> {
     return [...this.records[kind].values()].map((v) => structuredClone(v));
   }
@@ -60,11 +65,11 @@ export class MemoryStore implements RecordStore {
   async setSetting(key: string, value: string): Promise<void> {
     this.settings.set(key, value);
   }
-  async putAudio(id: string, bytes: Buffer, mime: string): Promise<void> {
-    this.audio.set(id, { bytes: Buffer.from(bytes), mime });
+  async putFile(bucket: Bucket, id: string, bytes: Buffer, mime: string): Promise<void> {
+    this.files.set(`${bucket}:${id}`, { bytes: Buffer.from(bytes), mime });
   }
-  async getAudio(id: string): Promise<Audio | null> {
-    return this.audio.get(id) ?? null;
+  async getFile(bucket: Bucket, id: string): Promise<StoredFile | null> {
+    return this.files.get(`${bucket}:${id}`) ?? null;
   }
 }
 
@@ -76,6 +81,7 @@ const schemas = {
   enrollment: enrollmentSchema,
   assignment: assignmentSchema,
   teacher: teacherEmailSchema,
+  post: postSchema,
 };
 const clients = new Map<string, Promise<MongoClient>>();
 function connect(uri: string): Promise<MongoClient> {
@@ -140,20 +146,20 @@ export class MongoStore implements RecordStore {
       .collection<{ _id: string; value: string }>("settings")
       .updateOne({ _id: key }, { $set: { value } }, { upsert: true });
   }
-  async putAudio(id: string, bytes: Buffer, mime: string): Promise<void> {
+  async putFile(bucket: Bucket, id: string, bytes: Buffer, mime: string): Promise<void> {
     const upload = new GridFSBucket(await this.db(), {
-      bucketName: "audio",
+      bucketName: bucket,
     }).openUploadStream(id, { metadata: { mime } });
     await new Promise<void>((resolve, reject) =>
       upload.once("error", reject).end(bytes, () => resolve()),
     );
   }
-  async getAudio(id: string): Promise<Audio | null> {
-    const bucket = new GridFSBucket(await this.db(), { bucketName: "audio" });
-    const [file] = await bucket.find({ filename: id }).toArray();
+  async getFile(bucket: Bucket, id: string): Promise<StoredFile | null> {
+    const files = new GridFSBucket(await this.db(), { bucketName: bucket });
+    const [file] = await files.find({ filename: id }).toArray();
     if (!file) return null;
     const chunks: Buffer[] = [];
-    for await (const chunk of bucket.openDownloadStream(file._id))
+    for await (const chunk of files.openDownloadStream(file._id))
       chunks.push(Buffer.from(chunk));
     return {
       bytes: Buffer.concat(chunks),

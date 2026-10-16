@@ -787,6 +787,95 @@ details > div {
   font-size: 14px;
   color: var(--ink-2);
 }
+.post-update {
+  display: grid;
+  grid-template-columns: 1fr auto;
+}
+.post-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.post-images {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+}
+.post-images-1 {
+  grid-template-columns: 1fr;
+}
+.post-images a {
+  display: block;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.post-images img {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: cover;
+}
+.post-images-1 img {
+  object-fit: contain;
+}
+.post-images a:has(.post-image-art) {
+  justify-self: start;
+  border: 0;
+  background: #000;
+}
+.post-images img.post-image-art {
+  width: auto;
+  max-width: 100%;
+  height: 160px;
+  padding: 10px;
+  image-rendering: pixelated;
+}
+.composer {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+}
+.composer textarea {
+  width: 100%;
+  resize: vertical;
+}
+.composer-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.composer-pictures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.composer-picture {
+  position: relative;
+}
+.composer-picture img {
+  display: block;
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+.composer-remove {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 0;
+  color: #fff;
+  background: var(--ink);
+  line-height: 1;
+}
 .setup-list {
   list-style: none;
   margin: 0;

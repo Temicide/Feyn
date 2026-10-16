@@ -8,6 +8,7 @@ import {
   type TeacherCourse,
 } from "../shared/contracts.js";
 import { api, json } from "./api.js";
+import { PostCard, PostComposer } from "./Posts.js";
 import { go, href } from "./route.js";
 import { Confirm, dueLabel, ErrorBanner, failure, Loading } from "./ui.js";
 
@@ -185,7 +186,7 @@ export function TeacherCoursePage({
 }) {
   const [data, setData] = useState<TeacherCourse | null>(null),
     [error, setError] = useState(""),
-    [tab, setTab] = useState<"assignments" | "students">("assignments"),
+    [tab, setTab] = useState<"assignments" | "posts" | "students">("assignments"),
     [copied, setCopied] = useState(false),
     [creating, setCreating] = useState(false);
   async function load() {
@@ -261,7 +262,7 @@ export function TeacherCoursePage({
     ) : (
       <Loading text="Opening the course" />
     );
-  const { course, roster, assignments } = data;
+  const { course, roster, assignments, posts } = data;
   return (
     <div className="teacher-page">
       <a className="link-button back-link" href={href({ kind: "desk" })}>
@@ -314,6 +315,13 @@ export function TeacherCoursePage({
           onClick={() => setTab("assignments")}
         >
           Assignments
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "posts"}
+          onClick={() => setTab("posts")}
+        >
+          Posts <span className="tab-count">{posts.length}</span>
         </button>
         <button
           role="tab"
@@ -394,6 +402,34 @@ export function TeacherCoursePage({
               </article>
             );
           })}
+        </div>
+      )}
+      {tab === "posts" && (
+        <div className="stream-posts">
+          <PostComposer courseId={courseId} onPosted={load} />
+          {posts.length === 0 && (
+            <p className="card post fine-print">
+              No posts yet. Share news, reminders or pictures with your class.
+            </p>
+          )}
+          {posts.map((post) => (
+            <PostCard
+              key={post.id}
+              post={post}
+              byline="You posted"
+              onRemove={() =>
+                act(
+                  () =>
+                    api(
+                      `/teacher/posts/${encodeURIComponent(post.id)}`,
+                      z.object({}),
+                      { method: "DELETE" },
+                    ),
+                  "Could not delete the post.",
+                )
+              }
+            />
+          ))}
         </div>
       )}
       {tab === "students" && (
