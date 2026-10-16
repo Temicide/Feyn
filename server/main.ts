@@ -6,7 +6,7 @@ import { z } from "zod";
 import { Attempts, belongsTo } from "./attempts.js";
 import { auth, authConfig, HttpError } from "./auth.js";
 import { Courses } from "./courses.js";
-import { prepare } from "./seed.js";
+import { prepare, tutorialCourseId } from "./seed.js";
 import { openStore, type RecordStore } from "./store.js";
 import {
   classRecapCounts,
@@ -25,7 +25,12 @@ import {
   createAttemptSchema,
   draftRequestSchema,
   maxAudioBytes,
+  maxPostImageBytes,
+  maxPostImages,
+  postImageMimes,
+  postTextSchema,
   replacementSchema,
+  reviewRequestInputSchema,
   teacherReviewRequestSchema,
   submissionSchema,
   reviewedTranscript,
@@ -56,7 +61,11 @@ export function createApp(
   const courses = new Courses(records, ready);
   const { router, caller, teacher } = auth(
     config,
-    (session) => store.signIn(session.sub, session.name),
+    async (session) => {
+      const isNew = !(await store.learners()).some((l) => l.id === session.sub);
+      if (isNew) await courses.welcome(tutorialCourseId, session.sub, session.email);
+      await store.signIn(session.sub, session.name);
+    },
     (email) => courses.isTeacher(email),
   );
   const hosts = [...loopback, ...(config.origin ? [config.origin.host] : [])];
@@ -84,6 +93,13 @@ export function createApp(
   const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: maxAudioBytes, files: 1 },
+  });
+  const imageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: maxPostImageBytes, files: maxPostImages },
+  });
+  const imageMime = z.enum(postImageMimes, {
+    error: "Pictures must be PNG, JPEG, WebP or GIF images.",
   });
   const answerKind = z.enum(["main", "followup-1", "followup-2"]);
   function id(value: unknown): string {
@@ -225,6 +241,53 @@ export function createApp(
       ),
     );
   });
+  app.post(
+    "/api/teacher/courses/:id/posts",
+    imageUpload.array("images", maxPostImages),
+    async (req, res) => {
+      const session = await teacher(req);
+      const course = await courses.owned(session.email, String(req.params.id));
+      const text = postTextSchema.parse(req.body.text ?? ""),
+        files = Array.isArray(req.files) ? req.files : [],
+        mimes = files.map((file) => imageMime.parse(file.mimetype)),
+        postId = randomUUID();
+      const images = await Promise.all(
+        files.map(async (file, index) => {
+          const id = randomUUID(),
+            mime = mimes[index]!;
+          await records.putFile("image", id, file.buffer, mime);
+          return { source: "upload" as const, id, mime };
+        }),
+      );
+      res.json(await courses.createPost(course, postId, text, images));
+    },
+  );
+  app.delete("/api/teacher/posts/:id", async (req, res) => {
+    const session = await teacher(req);
+    const post = await courses.findPost(String(req.params.id));
+    await courses.owned(session.email, post.courseId);
+    await courses.removePost(post);
+    res.json({});
+  });
+  app.get("/api/posts/:id/images/:imageId", async (req, res) => {
+    const session = caller(req);
+    const post = await courses.findPost(String(req.params.id)),
+      course = await courses.course(post.courseId),
+      image = post.images.find(
+        (i) => i.source === "upload" && i.id === req.params.imageId,
+      ),
+      file =
+        image?.source === "upload" &&
+        (await courses.member({ id: session.sub, email: session.email }, course))
+          ? await records.getFile("image", image.id)
+          : null;
+    if (!file) throw new HttpError(404, "Picture not found.");
+    res
+      .type(file.mime)
+      .set("X-Content-Type-Options", "nosniff")
+      .set("Cache-Control", "private, max-age=86400")
+      .send(file.bytes);
+  });
   app.get("/api/teacher/assignments/:id", async (req, res) => {
     const session = await teacher(req);
     res.json(await teacherView(String(req.params.id), session.email));
@@ -279,7 +342,7 @@ export function createApp(
       assignment,
       courseTitle: course.title,
       learner,
-      completedAt: (await store.completion(learner.id, assignment.id))?.at ?? null,
+      status: await store.workStatus(learner.id, assignment.id),
       attempts: (await store.attempts()).filter(
         (a) => a.assignmentId === assignment.id && belongsTo(a, learner.id),
       ),
@@ -337,7 +400,7 @@ export function createApp(
       )
         throw new Error("Choose an audio file.");
       const audioId = randomUUID();
-      await records.putAudio(audioId, req.file.buffer, req.file.mimetype);
+      await records.putFile("audio", audioId, req.file.buffer, req.file.mimetype);
       const answer = await store.addAnswer(
         attempt.id,
         kind,
@@ -370,7 +433,7 @@ export function createApp(
   app.post("/api/answers/:id/transcribe", async (req, res) => {
     const answer = await ownAnswer(req, req.params.id);
     const audio = answer.audioId
-      ? await records.getAudio(answer.audioId)
+      ? await records.getFile("audio", answer.audioId)
       : null;
     if (!audio) throw new Error("No recording saved.");
     const transcript = await transcribe(
@@ -388,7 +451,7 @@ export function createApp(
   app.get("/api/answers/:id/audio", async (req, res) => {
     const answer = await ownAnswer(req, req.params.id, "read");
     const audio = answer.audioId
-      ? await records.getAudio(answer.audioId)
+      ? await records.getFile("audio", answer.audioId)
       : null;
     if (!audio) {
       res.status(404).end();
@@ -438,6 +501,11 @@ export function createApp(
   app.post("/api/attempts/:id/finish", async (req, res) =>
     res.json(await store.finish((await ownAttempt(req, req.params.id)).id)),
   );
+  app.post("/api/attempts/:id/review-request", async (req, res) => {
+    const attempt = await ownAttempt(req, req.params.id);
+    const input = reviewRequestInputSchema.parse(req.body);
+    res.json(await store.requestReview(attempt.id, input.note));
+  });
   app.post("/api/attempts/:id/review", async (req, res) => {
     const session = await teacher(req);
     const input = teacherReviewRequestSchema.parse(req.body);
@@ -628,10 +696,16 @@ export function createApp(
   app.use(
     (
       error: unknown,
-      _req: express.Request,
+      req: express.Request,
       res: express.Response,
       _next: express.NextFunction,
     ) => {
+      if (error instanceof multer.MulterError && req.path.includes("/posts")) {
+        res.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({
+          error: `Add up to ${maxPostImages} pictures, each under 1 MB.`,
+        });
+        return;
+      }
       if (
         error instanceof multer.MulterError &&
         error.code === "LIMIT_FILE_SIZE"

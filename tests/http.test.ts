@@ -13,6 +13,7 @@ import {
   bootstrapSchema,
   courseSchema,
   meSchema,
+  postSchema,
   studentCoursesSchema,
   teacherCourseSchema,
   teacherViewSchema,
@@ -28,7 +29,8 @@ const env = {
   MCP_TOKEN: "mcp-test-token",
 };
 const local = "127.0.0.1:4173";
-const server = createApp(new MemoryStore(), env).listen(0, "127.0.0.1");
+const records = new MemoryStore();
+const server = createApp(records, env).listen(0, "127.0.0.1");
 await once(server, "listening");
 after(() => server.close());
 const address = server.address();
@@ -569,7 +571,9 @@ test("recordings over 4 MB are refused with a named limit", async () => {
 test("a student joins with a code, leaves, and gets their history back on rejoining", async () => {
   const cookie = await signIn("rejoin@school.test", "Rae Joiner");
   const courses = async () =>
-    studentCoursesSchema.parse((await call("/api/courses", { headers: { cookie } })).body);
+    studentCoursesSchema
+      .parse((await call("/api/courses", { headers: { cookie } })).body)
+      .filter((c) => c.id !== "lets-get-started");
   assert.deepEqual(await courses(), []);
   const unknown = await enroll(cookie, "NOPE99");
   assert.equal(unknown.status, 404);
@@ -578,7 +582,7 @@ test("a student joins with a code, leaves, and gets their history back on rejoin
   assert.equal((await enroll(cookie, " feyn01 ")).status, 200);
   const [course] = await courses();
   assert.equal(course?.title, "Calculus 1 · Rates of change");
-  assert.deepEqual(course?.assignments.map((a) => [a.id, a.completedAt]), [["cart-speed", null]]);
+  assert.deepEqual(course?.assignments.map((a) => [a.id, a.status]), [["cart-speed", { kind: "none" }]]);
 
   const attempt = attemptSchema.parse(
     (await call("/api/attempts", json(cookie, "POST", { ...attemptBody, sample: true }))).body,
@@ -618,7 +622,7 @@ test("each teacher sees only their own course, and a removed student leaves the 
       (await call("/api/teacher/courses", { headers: { cookie } })).body,
     ).map((c) => c.id);
   assert.deepEqual(await mine(bo), [created.id]);
-  assert.deepEqual(await mine(ada), ["demo-calculus-1"]);
+  assert.deepEqual(await mine(ada), ["demo-calculus-1", "lets-get-started"]);
   const path = `/api/teacher/courses/${created.id}`;
   assert.equal((await call(path, { headers: { cookie: ada } })).status, 404);
   assert.equal((await call(`${path}/code`, json(ada, "POST", {}))).status, 404);
@@ -717,4 +721,198 @@ test("a teacher writes an assignment by hand, posts it, and a student sees its r
 
   const sample = await call(`/api/attempts/${attempt.id}/sample`, json(student, "POST", { kind: "followup-2" }));
   assert.equal(sample.status, 400, "this assignment has only one follow-up");
+});
+
+async function multipartCall(path: string, cookie: string, form: FormData) {
+  const multipart = new Request("http://upload.invalid", { method: "POST", body: form });
+  return call(path, {
+    method: "POST",
+    headers: {
+      cookie,
+      origin: `http://${local}`,
+      "content-type": multipart.headers.get("content-type") ?? "",
+    },
+    body: Buffer.from(await multipart.arrayBuffer()),
+  });
+}
+
+test("a new account starts in Let's Get Started and is not put back after leaving", async () => {
+  const cookie = await signIn("newcomer@school.test", "Nia Newcomer");
+  const tutorial = async (who = cookie) =>
+    studentCoursesSchema
+      .parse((await call("/api/courses", { headers: { cookie: who } })).body)
+      .find((c) => c.id === "lets-get-started");
+  const course = await tutorial();
+  assert.equal(course?.title, "Let's Get Started");
+  assert.equal(course?.posts.length, 6);
+  assert.match(course?.posts[0]?.text ?? "", /^Welcome to Feyn!/);
+  assert.deepEqual(course?.posts[0]?.images, [
+    { source: "bundled", path: "/art/child-listening.png" },
+  ]);
+  assert.deepEqual(course?.assignments.map((a) => a.id), ["first-lesson"]);
+  assert.equal(
+    (await call("/api/assignments/first-lesson/bootstrap", { headers: { cookie } })).status,
+    200,
+  );
+
+  assert.equal(
+    (await call("/api/courses/lets-get-started/leave", json(cookie, "POST", {}))).status,
+    200,
+  );
+  const again = await signIn("newcomer@school.test", "Nia Newcomer");
+  assert.equal(await tutorial(again), undefined, "signing in again does not re-enroll");
+  assert.equal((await enroll(again, "hello1")).status, 200);
+  assert.equal((await tutorial(again))?.id, "lets-get-started");
+
+  const owner = await signIn("teacher@school.test", "Ms Rivera");
+  assert.equal(await tutorial(owner), undefined, "the tutorial's teacher is not its student");
+});
+
+test("a teacher posts text and pictures that only their class can see, and can delete them", async () => {
+  const bo = await signIn("other@school.test", "Mr Okafor");
+  const ada = await signIn("teacher@school.test", "Ms Rivera");
+  const created = courseSchema.parse(
+    (await call("/api/courses", json(bo, "POST", { title: "Art 1" }))).body,
+  );
+  const student = await signIn("painter@school.test", "Pat Painter");
+  assert.equal((await enroll(student, created.joinCode)).status, 200);
+  const outsider = await signIn("outside@school.test", "Out Sider");
+  const path = `/api/teacher/courses/${created.id}/posts`;
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  const form = (text: string, files: File[] = []) => {
+    const body = new FormData();
+    body.set("text", text);
+    for (const file of files) body.append("images", file);
+    return body;
+  };
+
+  const posted = await multipartCall(
+    path,
+    bo,
+    form("  Field trip on Friday!\nBring a sketchbook.  ", [
+      new File([png], "trip.png", { type: "image/png" }),
+    ]),
+  );
+  assert.equal(posted.status, 200);
+  const post = postSchema.parse(posted.body);
+  assert.equal(post.text, "Field trip on Friday!\nBring a sketchbook.");
+  const [image] = post.images;
+  assert.equal(image?.source, "upload");
+  if (image?.source !== "upload") return;
+
+  const seen = studentCoursesSchema
+    .parse((await call("/api/courses", { headers: { cookie: student } })).body)
+    .find((c) => c.id === created.id);
+  assert.deepEqual(seen?.posts.map((p) => p.text), [post.text]);
+  const imagePath = `/api/posts/${post.id}/images/${image.id}`;
+  const picture = await call(imagePath, { headers: { cookie: student } });
+  assert.equal(picture.status, 200);
+  assert.equal(picture.headers.get("content-type"), "image/png");
+  assert.equal(picture.headers.get("x-content-type-options"), "nosniff");
+  assert.deepEqual(picture.body, png);
+  assert.equal((await call(imagePath, { headers: { cookie: outsider } })).status, 404);
+  assert.equal((await call(imagePath, { headers: { cookie: bo } })).status, 200);
+
+  assert.equal((await multipartCall(path, ada, form("Not my class"))).status, 404);
+  assert.notEqual((await multipartCall(path, student, form("Hi"))).status, 200);
+  const empty = await multipartCall(path, bo, form("   "));
+  assert.equal(empty.status, 400);
+  assert.match(z.object({ error: z.string() }).parse(empty.body).error, /Write something/);
+  const svg = await multipartCall(
+    path,
+    bo,
+    form("Vector", [new File(["<svg/>"], "x.svg", { type: "image/svg+xml" })]),
+  );
+  assert.equal(svg.status, 400);
+  const big = await multipartCall(
+    path,
+    bo,
+    form("Huge", [new File([Buffer.alloc(1024 * 1024 + 1)], "big.png", { type: "image/png" })]),
+  );
+  assert.equal(big.status, 413);
+  assert.match(z.object({ error: z.string() }).parse(big.body).error, /under 1 MB/);
+
+  const remove = (cookie: string) =>
+    call(`/api/teacher/posts/${post.id}`, {
+      method: "DELETE",
+      headers: { cookie, origin: `http://${local}` },
+    });
+  assert.equal((await remove(ada)).status, 404);
+  assert.equal((await remove(bo)).status, 200);
+  const after = studentCoursesSchema
+    .parse((await call("/api/courses", { headers: { cookie: student } })).body)
+    .find((c) => c.id === created.id);
+  assert.deepEqual(after?.posts, []);
+  assert.equal((await call(imagePath, { headers: { cookie: student } })).status, 404);
+});
+
+test("a student sends a review request and the status shows on bootstrap and the course list", async () => {
+  const student = await signIn("ask@school.test", "Ash Asker");
+  const other = await signIn("nosy@school.test", "Nox Nosy");
+  await enroll(student);
+  await enroll(other);
+  const path = "/api/assignments/cart-speed/bootstrap";
+  const status = async (cookie: string) =>
+    bootstrapSchema.parse((await call(path, { headers: { cookie } })).body).status;
+  assert.deepEqual(await status(student), { kind: "none" });
+
+  const created = attemptSchema.parse(
+    (await call("/api/attempts", json(student, "POST", attemptBody))).body,
+  );
+  const concepts = created.rubric.concepts;
+  const criteria = concepts.map((c) => ({
+    id: c.id,
+    state: "missing" as const,
+    quote: "",
+    reason: "Not mentioned.",
+  }));
+  await records.put("attempt", {
+    ...created,
+    mainAssessment: {
+      kind: "main",
+      outcome: "needs-work",
+      criteria,
+      majorError: false,
+      summary: "Missing ideas.",
+      provider: "Test fixture",
+      model: "fixture",
+      at: "2026-10-15T12:00:00.000Z",
+    },
+  });
+  const turnedIn = {
+    kind: "not-approved",
+    by: "pip",
+    attemptId: created.id,
+    turnedInAt: "2026-10-15T12:00:00.000Z",
+    canRequestReview: true,
+  };
+  assert.deepEqual(await status(student), turnedIn);
+
+  const request = `/api/attempts/${created.id}/review-request`;
+  assert.equal((await call(request, json(other, "POST", { note: "" }))).status, 404);
+  assert.equal(
+    (await call(request, json(student, "POST", { note: "x".repeat(301) }))).status,
+    400,
+  );
+  const sent = await call(request, json(student, "POST", { note: "  I explained the interval.  " }));
+  assert.equal(sent.status, 200);
+  assert.equal(attemptSchema.parse(sent.body).reviewRequest?.note, "I explained the interval.");
+  assert.deepEqual(await status(student), {
+    kind: "waiting",
+    reason: "requested",
+    attemptId: created.id,
+    turnedInAt: "2026-10-15T12:00:00.000Z",
+    canRequestReview: false,
+  });
+  assert.equal((await call(request, json(student, "POST", { note: "" }))).status, 400);
+
+  const course = studentCoursesSchema
+    .parse((await call("/api/courses", { headers: { cookie: student } })).body)
+    .find((c) => c.id === "demo-calculus-1");
+  assert.equal(course?.assignments[0]?.status.kind, "waiting");
+  const teacher = await signIn("teacher@school.test", "Ms Rivera");
+  const card = teacherCourseSchema
+    .parse((await call("/api/teacher/courses/demo-calculus-1", { headers: { cookie: teacher } })).body)
+    .assignments.find((a) => a.id === "cart-speed");
+  assert.ok(card && card.waiting >= 1);
 });

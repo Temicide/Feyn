@@ -11,6 +11,7 @@ import {
   validateMain,
   validateDiagnostic,
 } from "../server/providers.js";
+import { isComplete } from "../shared/work-status.js";
 import { assignment, interval, moment, rubric, workspace } from "./support.js";
 import {
   reviewedTranscript,
@@ -78,6 +79,8 @@ async function fresh(): Promise<Attempts> {
   await courses.join(you, "FEYN01");
   return store;
 }
+const complete = async (store: Attempts) =>
+  isComplete(await store.workStatus(you, assignment.id));
 const teacher = (store: Attempts) => store.evidence(assignment, [you]);
 async function submitMain(
   store: Attempts,
@@ -116,7 +119,7 @@ test("main pass plus wrong required follow-up earns completion without changing 
   );
   assert.equal(result.mainAssessment?.outcome, "pass");
   assert.equal(result.diagnostics[0]?.assessment.outcome, "incorrect");
-  assert.ok(await store.completion(you, assignment.id));
+  assert.equal(await complete(store), true);
   assert.equal((await store.finish(attempt.id)).diagnostics.length, 1);
   const row = (await teacher(store)).recap.find(
     (c) => c.id === interval,
@@ -127,9 +130,9 @@ test("main pass plus wrong required follow-up earns completion without changing 
 test("weaker voluntary retry updates evidence and never revokes completion", async () => {
   const store = await fresh();
   await submitMain(store);
-  const earned = (await store.completion(you, assignment.id))?.at;
   await submitMain(store, "missing", true);
-  assert.equal((await store.completion(you, assignment.id))?.at, earned);
+  assert.equal(await complete(store), true);
+  assert.equal((await store.workStatus(you, assignment.id)).kind, "waiting");
   assert.equal(
     (await store.attempts()).filter((a) => a.learnerId === you).length,
     2,
@@ -147,7 +150,7 @@ test("prepared walkthrough cannot complete the real learner or become their clas
     null,
   );
   await store.recordMain(answer.id, main(), transcript);
-  assert.equal(await store.completion(you, assignment.id), null);
+  assert.deepEqual(await store.workStatus(you, assignment.id), { kind: "none" });
   assert.equal((await store.get(attempt.id)).learnerId, walkthroughId(you, assignment.courseId));
   assert.ok(
     (await teacher(store)).recap.every((c) => c.unassessed.includes(you)),
